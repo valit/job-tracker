@@ -244,7 +244,7 @@ function CompanyLogo({ name, domain: domainOverride, logoUrl, size = 40, radius 
           alt={name}
           width={size}
           height={size}
-          onError={() => { if (src === primary) setSrc(fallback); else setErr(true); }}
+          onError={() => setErr(true)}
           style={{ width: "100%", height: "100%", objectFit: "cover" }}
         />
       ) : (
