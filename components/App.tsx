@@ -1418,18 +1418,31 @@ function JobsView({ jobs, activities, onSelect }: {
       <div style={{ display: "grid", gap: 8 }}>
         {filtered.map(j => (
           <div key={j.id} onClick={() => onSelect(j)}
-            style={{ background: "#fff", borderRadius: 12, padding: isMobile ? "12px 16px" : "22px 20px", cursor: "pointer", border: `1px solid ${C.border}`, borderLeft: `3px solid ${STATUS_BORDER[j.status]}`, transition: "box-shadow .15s", display: "flex", alignItems: "center", gap: 16 }}
+            style={{ background: "#fff", borderRadius: 12, padding: isMobile ? "12px 16px" : "22px 20px", cursor: "pointer", border: `1px solid ${C.border}`, borderLeft: `3px solid ${STATUS_BORDER[j.status]}`, transition: "box-shadow .15s", display: "flex", alignItems: isMobile ? "flex-start" : "center", gap: 16 }}
             onMouseEnter={e => (e.currentTarget as HTMLDivElement).style.boxShadow = "0 2px 14px rgba(0,0,0,0.07)"}
             onMouseLeave={e => (e.currentTarget as HTMLDivElement).style.boxShadow = "none"}>
             <CompanyLogo name={j.companyName || "?"} logoUrl={j.companyLogoUrl || undefined} size={40} radius={10} />
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontSize: 15, fontWeight: 500, color: C.text, marginBottom: 3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 400 }}>{j.name}</div>
-              <div style={{ fontSize: 13, color: C.muted }}>{j.companyName}{j.location ? ` — ${j.location}` : ""}</div>
-            </div>
-            <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 9, flexShrink: 0 }}>
-              <StatusBadge status={j.status} />
-              {(() => { const d = (lastActivity[j.id] || j.createdAt); const fmt = d ? formatDate(d) : ""; return fmt ? <span style={{ fontSize: 11, color: C.muted }}>{fmt}</span> : null; })()}
-            </div>
+            {isMobile ? (
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 15, fontWeight: 500, color: C.text, marginBottom: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{j.name}</div>
+                <div style={{ fontSize: 13, color: C.muted, marginBottom: 8 }}>{j.companyName}{j.location ? ` · ${j.location}` : ""}</div>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                  <StatusBadge status={j.status} />
+                  {(() => { const d = (lastActivity[j.id] || j.createdAt); const fmt = d ? formatDate(d) : ""; return fmt ? <span style={{ fontSize: 11, color: C.muted }}>{fmt}</span> : null; })()}
+                </div>
+              </div>
+            ) : (
+              <>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 15, fontWeight: 500, color: C.text, marginBottom: 3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 400 }}>{j.name}</div>
+                  <div style={{ fontSize: 13, color: C.muted }}>{j.companyName}{j.location ? ` · ${j.location}` : ""}</div>
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 9, flexShrink: 0 }}>
+                  <StatusBadge status={j.status} />
+                  {(() => { const d = (lastActivity[j.id] || j.createdAt); const fmt = d ? formatDate(d) : ""; return fmt ? <span style={{ fontSize: 11, color: C.muted }}>{fmt}</span> : null; })()}
+                </div>
+              </>
+            )}
           </div>
         ))}
       </div>
@@ -1455,7 +1468,7 @@ function JobsView({ jobs, activities, onSelect }: {
                   <CompanyLogo name={j.companyName || "?"} logoUrl={j.companyLogoUrl || undefined} size={40} radius={10} />
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontSize: 15, fontWeight: 700, fontFamily: "Georgia, 'Times New Roman', serif", color: C.text }}>{j.name}</div>
-                    <div style={{ fontSize: 13, color: C.muted }}>{j.companyName}{j.location ? ` — ${j.location}` : ""}</div>
+                    <div style={{ fontSize: 13, color: C.muted }}>{j.companyName}{j.location ? ` · ${j.location}` : ""}</div>
                   </div>
                   <StatusBadge status={j.status} archived />
                 </div>
