@@ -1408,7 +1408,7 @@ function JobsView({ jobs, activities, onSelect }: {
             <CompanyLogo name={j.companyName || "?"} logoUrl={j.companyLogoUrl || undefined} size={40} radius={10} />
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontSize: 15, fontWeight: 500, color: C.text, marginBottom: 3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 400 }}>{j.name}</div>
-              <div style={{ fontSize: 13, color: C.muted }}>{j.companyName}</div>
+              <div style={{ fontSize: 13, color: C.muted }}>{j.companyName}{j.location ? ` — ${j.location}` : ""}</div>
             </div>
             <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 9, flexShrink: 0 }}>
               <StatusBadge status={j.status} />
@@ -1439,7 +1439,7 @@ function JobsView({ jobs, activities, onSelect }: {
                   <CompanyLogo name={j.companyName || "?"} logoUrl={j.companyLogoUrl || undefined} size={40} radius={10} />
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontSize: 15, fontWeight: 700, fontFamily: "Georgia, 'Times New Roman', serif", color: C.text }}>{j.name}</div>
-                    <div style={{ fontSize: 13, color: C.muted }}>{j.companyName}</div>
+                    <div style={{ fontSize: 13, color: C.muted }}>{j.companyName}{j.location ? ` — ${j.location}` : ""}</div>
                   </div>
                   <StatusBadge status={j.status} archived />
                 </div>
