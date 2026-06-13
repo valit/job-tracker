@@ -3,60 +3,93 @@ import { Client } from "@notionhq/client";
 export const notion = new Client({ auth: process.env.NOTION_TOKEN });
 
 export const COMPANIES_DB = process.env.NOTION_COMPANIES_DB!;
-export const CONTACTS_DB = process.env.NOTION_CONTACTS_DB!;
+export const JOBS_DB = process.env.NOTION_JOBS_DB!;
 export const ACTIVITY_DB = process.env.NOTION_ACTIVITY_DB!;
+export const ASSETS_DB = process.env.NOTION_ASSETS_DB!;
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
-export type Status = "Researching" | "Applied" | "Interviewing" | "Offer" | "Rejected" | "Closed";
-export type Priority = "High" | "Medium" | "Low";
-export type ActivityType = "Email sent" | "Email received" | "Phone call" | "Video call" | "Application submitted" | "Interview" | "Referral" | "Note";
-export type Relationship = "Recruiter" | "Hiring Manager" | "Interviewer" | "Referral" | "Connection";
+export type JobStatus =
+  | "Want to apply"
+  | "Applied (no response)"
+  | "Applied (referred)"
+  | "In progress"
+  | "Closed";
+
+export type ActivityType =
+  | "Email sent"
+  | "Email received"
+  | "Phone call"
+  | "Video call"
+  | "Application submitted"
+  | "Interview"
+  | "Referral submitted"
+  | "Note";
+
+export type AssetType = "URL" | "Gmail link" | "Google Drive link" | "Person";
+export type PersonTitle = "Recruiter" | "Hiring Manager" | "Interviewer" | "Referral" | "Connection";
+
+export interface CompanyLink {
+  label: string;
+  url: string;
+  type: string;
+}
 
 export interface Company {
   id: string;
   name: string;
-  status: Status;
-  role: string;
-  location: string;
-  jobUrl: string;
-  appliedDate: string;
-  lastActivity: string;
-  priority: Priority;
   notes: string;
+  logoUrl: string;
+  links: CompanyLink[];
   url: string;
 }
 
-export interface Contact {
+export interface Job {
   id: string;
   name: string;
-  companyIds: string[];
-  companyNames: string[];
-  role: string;
-  email: string;
-  phone: string;
-  linkedin: string;
-  relationship: Relationship;
+  companyId: string;
+  companyName: string;
+  companyLogoUrl: string;
+  status: JobStatus;
+  archived: boolean;
   notes: string;
+  location: string;
+  createdAt: string;
   url: string;
 }
 
 export interface Activity {
   id: string;
-  summary: string;
-  companyIds: string[];
-  companyNames: string[];
-  contactIds: string[];
-  contactNames: string[];
   type: ActivityType;
   date: string;
   notes: string;
+  jobId: string;
+  jobName: string;
+  url: string;
+}
+
+export interface Asset {
+  id: string;
+  type: AssetType;
+  label: string;
+  assetUrl: string;
+  // Person fields
+  personName: string;
+  personTitle: PersonTitle | "";
+  personEmail: string;
+  personPhone: string;
+  personLinkedin: string;
+  personNotes: string;
+  // Links
+  companyId: string;
+  jobId: string;
+  activityId: string;
   url: string;
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
-function getText(prop: any): string {
+export function getText(prop: any): string {
   if (!prop) return "";
   if (prop.type === "title") return prop.title?.map((t: any) => t.plain_text).join("") ?? "";
   if (prop.type === "rich_text") return prop.rich_text?.map((t: any) => t.plain_text).join("") ?? "";
@@ -68,63 +101,74 @@ function getText(prop: any): string {
   return "";
 }
 
-function getRelationNames(prop: any): { ids: string[]; names: string[] } {
-  if (!prop || prop.type !== "relation") return { ids: [], names: [] };
-  return {
-    ids: prop.relation?.map((r: any) => r.id) ?? [],
-    names: [],
-  };
+function getRelationId(prop: any): string {
+  if (!prop || prop.type !== "relation") return "";
+  return prop.relation?.[0]?.id ?? "";
 }
+
+// ── Parsers ────────────────────────────────────────────────────────────────
 
 export function parseCompany(page: any): Company {
   const p = page.properties;
+  let links: CompanyLink[] = [];
+  try { links = JSON.parse(getText(p.Links) || "[]"); } catch {}
   return {
     id: page.id,
-    name: getText(p.Company),
-    status: (getText(p.Status) as Status) || "Researching",
-    role: getText(p.Role),
-    location: getText(p.Location),
-    jobUrl: getText(p["Job URL"]),
-    appliedDate: getText(p["Applied Date"]),
-    lastActivity: getText(p["Last Activity"]),
-    priority: (getText(p.Priority) as Priority) || "Medium",
+    name: getText(p.Name) || getText(p.Company),
     notes: getText(p.Notes),
+    logoUrl: getText(p["Logo URL"]),
+    links,
     url: page.url,
   };
 }
 
-export function parseContact(page: any): Contact {
+export function parseJob(page: any): Job {
   const p = page.properties;
-  const company = getRelationNames(p.Company);
   return {
     id: page.id,
     name: getText(p.Name),
-    companyIds: company.ids,
-    companyNames: [],
-    role: getText(p.Role),
-    email: getText(p.Email),
-    phone: getText(p.Phone),
-    linkedin: getText(p.LinkedIn),
-    relationship: (getText(p.Relationship) as Relationship) || "Connection",
+    companyId: getRelationId(p.Company),
+    companyName: "",
+    companyLogoUrl: "",
+    status: (getText(p.Status) as JobStatus) || "Want to apply",
+    archived: p.Archived?.checkbox === true,
     notes: getText(p.Notes),
+    location: getText(p.Location),
+    createdAt: page.created_time ?? "",
     url: page.url,
   };
 }
 
 export function parseActivity(page: any): Activity {
   const p = page.properties;
-  const company = getRelationNames(p.Company);
-  const contact = getRelationNames(p.Contact);
   return {
     id: page.id,
-    summary: getText(p.Summary),
-    companyIds: company.ids,
-    companyNames: [],
-    contactIds: contact.ids,
-    contactNames: [],
     type: (getText(p.Type) as ActivityType) || "Note",
     date: getText(p.Date),
-    notes: getText(p.Notes),
+    // Notes may be a rich_text field; fall back to Summary or Name title if absent
+    notes: getText(p.Notes) || getText(p.Summary) || getText(p.Name),
+    jobId: getRelationId(p.Job),
+    jobName: "",
+    url: page.url,
+  };
+}
+
+export function parseAsset(page: any): Asset {
+  const p = page.properties;
+  return {
+    id: page.id,
+    type: (getText(p.Type) as AssetType) || "URL",
+    label: getText(p.Label) || getText(p.Name),
+    assetUrl: getText(p.URL),
+    personName: getText(p["Person Name"]),
+    personTitle: (getText(p["Person Title"]) as PersonTitle) || "",
+    personEmail: getText(p["Person Email"]),
+    personPhone: getText(p["Person Phone"]),
+    personLinkedin: getText(p["Person LinkedIn"]),
+    personNotes: getText(p["Person Notes"]),
+    companyId: getRelationId(p.Company),
+    jobId: getRelationId(p.Job),
+    activityId: getRelationId(p.Activity),
     url: page.url,
   };
 }
