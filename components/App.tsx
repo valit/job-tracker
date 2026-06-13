@@ -8,6 +8,19 @@ import {
   Send, Pencil, Building2, Briefcase, Paperclip, Globe, Archive,
 } from "lucide-react";
 
+// ── Mobile hook ───────────────────────────────────────────────────────────
+
+function useIsMobile() {
+  const [isMobile, setIsMobile] = useState(false);
+  useEffect(() => {
+    const check = () => setIsMobile(window.innerWidth < 768);
+    check();
+    window.addEventListener("resize", check);
+    return () => window.removeEventListener("resize", check);
+  }, []);
+  return isMobile;
+}
+
 // ── Constants ──────────────────────────────────────────────────────────────
 
 const JOB_STATUSES: JobStatus[] = [
@@ -187,15 +200,16 @@ function Modal({ title, onClose, onBack, children, width = 560 }: {
   title: string; onClose: () => void; onBack?: () => void;
   children: React.ReactNode; width?: number;
 }) {
+  const isMobile = useIsMobile();
   useEffect(() => {
     const handler = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
   }, [onClose]);
   return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }} onClick={onClose}>
-      <div style={{ background: "#fff", borderRadius: 12, width: "100%", maxWidth: width, maxHeight: "90vh", overflow: "auto", boxShadow: "0 4px 24px rgba(0,0,0,0.08)" }} onClick={e => e.stopPropagation()}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "20px 24px 0" }}>
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", zIndex: 1000, display: "flex", alignItems: isMobile ? "flex-end" : "center", justifyContent: "center", padding: isMobile ? 0 : 16 }} onClick={onClose}>
+      <div style={{ background: "#fff", borderRadius: isMobile ? "16px 16px 0 0" : 12, width: "100%", maxWidth: isMobile ? "100%" : width, maxHeight: isMobile ? "92vh" : "90vh", overflow: "auto", boxShadow: "0 4px 24px rgba(0,0,0,0.08)" }} onClick={e => e.stopPropagation()}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: isMobile ? "20px 20px 0" : "20px 24px 0", position: "sticky", top: 0, background: "#fff", zIndex: 1, borderBottom: isMobile ? `1px solid ${C.border}` : "none", paddingBottom: isMobile ? 16 : 0 }}>
           {onBack && (
             <button onClick={onBack} style={{ background: "none", border: "none", cursor: "pointer", color: C.muted, padding: 4, display: "flex", flexShrink: 0 }}>
               <ChevronLeft size={18} />
@@ -206,7 +220,7 @@ function Modal({ title, onClose, onBack, children, width = 560 }: {
             <X size={18} />
           </button>
         </div>
-        <div style={{ padding: "20px 24px 24px" }}>{children}</div>
+        <div style={{ padding: isMobile ? "20px 20px 24px" : "20px 24px 24px" }}>{children}</div>
       </div>
     </div>
   );
@@ -834,6 +848,7 @@ function EditAssetModal({ asset, companies, jobs, onClose, onSave, onDelete }: {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const u = (k: string) => (e: any) => setForm((f: any) => ({ ...f, [k]: e.target.value }));
   const isPerson = asset.type === "Person";
+  const isMobile = useIsMobile();
   useEffect(() => {
     const handler = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
     document.addEventListener("keydown", handler);
@@ -874,10 +889,10 @@ function EditAssetModal({ asset, companies, jobs, onClose, onSave, onDelete }: {
   };
 
   return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }} onClick={onClose}>
-      <div style={{ background: "#fff", borderRadius: 12, width: "100%", maxWidth: 520, maxHeight: "90vh", overflow: "auto", boxShadow: "0 4px 24px rgba(0,0,0,0.08)", position: "relative" }} onClick={e => e.stopPropagation()}>
-        <div style={{ padding: "24px 28px" }}>
-          <button onClick={onClose} style={{ position: "absolute", right: 20, top: 20, background: "none", border: "none", cursor: "pointer", color: C.muted, display: "flex" }}>
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", zIndex: 1000, display: "flex", alignItems: isMobile ? "flex-end" : "center", justifyContent: "center", padding: isMobile ? 0 : 16 }} onClick={onClose}>
+      <div style={{ background: "#fff", borderRadius: isMobile ? "16px 16px 0 0" : 12, width: "100%", maxWidth: isMobile ? "100%" : 520, maxHeight: isMobile ? "92vh" : "90vh", overflow: "auto", boxShadow: "0 4px 24px rgba(0,0,0,0.08)", position: "relative" }} onClick={e => e.stopPropagation()}>
+        <div style={{ padding: isMobile ? "20px 20px" : "24px 28px" }}>
+          <button onClick={onClose} style={{ position: "absolute", right: isMobile ? 16 : 20, top: isMobile ? 16 : 20, background: "none", border: "none", cursor: "pointer", color: C.muted, display: "flex" }}>
             <X size={18} />
           </button>
 
@@ -1353,6 +1368,7 @@ function JobsView({ jobs, activities, onSelect }: {
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<JobStatus | "All">("All");
   const [archivedOpen, setArchivedOpen] = useState(false);
+  const isMobile = useIsMobile();
 
   const activeJobs = jobs.filter(j => !j.archived);
   const archivedJobs = jobs.filter(j => j.archived);
@@ -1372,20 +1388,20 @@ function JobsView({ jobs, activities, onSelect }: {
   const FILTERS: (JobStatus | "All")[] = ["All", "Want to apply", "Applied (no response)", "Applied (referred)", "In progress", "Closed"];
 
   return (
-    <div style={{ maxWidth: 760, margin: "0 auto" }}>
+    <div style={{ maxWidth: isMobile ? "100%" : 760, margin: "0 auto" }}>
       {/* Search + filter pills row */}
-      <div style={{ display: "flex", alignItems: "flex-start", gap: 12, marginBottom: 20, flexWrap: "wrap" }}>
-        <div style={{ position: "relative", flexShrink: 0 }}>
+      <div style={{ display: "flex", flexDirection: isMobile ? "column" : "row", alignItems: isMobile ? "stretch" : "flex-start", gap: 10, marginBottom: 20 }}>
+        <div style={{ position: "relative" }}>
           <Search size={14} style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", color: C.muted }} />
-          <input style={{ ...inputStyle, paddingLeft: 34, width: 220 }} placeholder="Search jobs…" value={search} onChange={e => setSearch(e.target.value)} />
+          <input style={{ ...inputStyle, paddingLeft: 34, width: "100%" }} placeholder="Search jobs…" value={search} onChange={e => setSearch(e.target.value)} />
         </div>
-        <div style={{ display: "flex", gap: 7, flexWrap: "wrap", alignItems: "center" }}>
+        <div style={{ display: "flex", gap: 7, alignItems: "center", overflowX: isMobile ? "auto" : "visible", flexWrap: isMobile ? "nowrap" : "wrap", paddingBottom: isMobile ? 2 : 0 }}>
           {FILTERS.map(f => {
             const count = f === "All" ? activeJobs.length : activeJobs.filter(j => j.status === f).length;
             const active = filter === f;
             return (
               <button key={f} onClick={() => setFilter(f)}
-                style={{ borderRadius: 20, padding: "6px 13px", fontSize: 12, fontWeight: 500, cursor: "pointer", border: "1.5px solid rgba(23,23,26,0.18)", background: active ? "#1C3830" : "transparent", color: active ? "#fff" : "#7A776F", whiteSpace: "nowrap" as const, fontFamily: "ui-monospace, 'SF Mono', Menlo, monospace" }}>
+                style={{ borderRadius: 20, padding: "6px 13px", fontSize: 12, fontWeight: 500, cursor: "pointer", border: "1.5px solid rgba(23,23,26,0.18)", background: active ? "#1C3830" : "transparent", color: active ? "#fff" : "#7A776F", whiteSpace: "nowrap" as const, fontFamily: "ui-monospace, 'SF Mono', Menlo, monospace", flexShrink: 0 }}>
                 {f} · {count}
               </button>
             );
@@ -1402,7 +1418,7 @@ function JobsView({ jobs, activities, onSelect }: {
       <div style={{ display: "grid", gap: 8 }}>
         {filtered.map(j => (
           <div key={j.id} onClick={() => onSelect(j)}
-            style={{ background: "#fff", borderRadius: 12, padding: "22px 20px", cursor: "pointer", border: `1px solid ${C.border}`, borderLeft: `3px solid ${STATUS_BORDER[j.status]}`, transition: "box-shadow .15s", display: "flex", alignItems: "center", gap: 16 }}
+            style={{ background: "#fff", borderRadius: 12, padding: isMobile ? "12px 16px" : "22px 20px", cursor: "pointer", border: `1px solid ${C.border}`, borderLeft: `3px solid ${STATUS_BORDER[j.status]}`, transition: "box-shadow .15s", display: "flex", alignItems: "center", gap: 16 }}
             onMouseEnter={e => (e.currentTarget as HTMLDivElement).style.boxShadow = "0 2px 14px rgba(0,0,0,0.07)"}
             onMouseLeave={e => (e.currentTarget as HTMLDivElement).style.boxShadow = "none"}>
             <CompanyLogo name={j.companyName || "?"} logoUrl={j.companyLogoUrl || undefined} size={40} radius={10} />
@@ -1683,6 +1699,7 @@ function AssetsView({ assets, companies, jobs, onUpdate, onDelete }: {
   const [typeFilter, setTypeFilter] = useState<AssetType | "All">("All");
   const [companyFilter, setCompanyFilter] = useState("");
   const [editingAsset, setEditingAsset] = useState<Asset | null>(null);
+  const isMobile = useIsMobile();
 
   const filtered = assets.filter(a => {
     if (typeFilter !== "All" && a.type !== typeFilter) return false;
@@ -1702,19 +1719,19 @@ function AssetsView({ assets, companies, jobs, onUpdate, onDelete }: {
   );
 
   return (
-    <div style={{ maxWidth: 760, margin: "0 auto" }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 24, flexWrap: "wrap" }}>
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+    <div style={{ maxWidth: isMobile ? "100%" : 760, margin: "0 auto" }}>
+      <div style={{ display: "flex", flexDirection: isMobile ? "column" : "row", alignItems: isMobile ? "stretch" : "center", justifyContent: "space-between", gap: 10, marginBottom: 20 }}>
+        <div style={{ display: "flex", gap: 8, overflowX: isMobile ? "auto" : "visible", flexWrap: isMobile ? "nowrap" : "wrap", paddingBottom: isMobile ? 2 : 0 }}>
           {(["All", "URL", "Gmail link", "Google Drive link", "Person"] as const).map(t => (
             <button key={t} onClick={() => setTypeFilter(t as any)}
-              style={{ borderRadius: 20, padding: "7px 16px", fontSize: 12, fontWeight: 500, cursor: "pointer", border: "1.5px solid rgba(23,23,26,0.18)", background: typeFilter === t ? "#1C3830" : "transparent", color: typeFilter === t ? "#fff" : "#7A776F", transition: "all .1s", fontFamily: "ui-monospace, 'SF Mono', Menlo, monospace" }}>
+              style={{ borderRadius: 20, padding: "7px 16px", fontSize: 12, fontWeight: 500, cursor: "pointer", border: "1.5px solid rgba(23,23,26,0.18)", background: typeFilter === t ? "#1C3830" : "transparent", color: typeFilter === t ? "#fff" : "#7A776F", transition: "all .1s", fontFamily: "ui-monospace, 'SF Mono', Menlo, monospace", flexShrink: 0, whiteSpace: "nowrap" as const }}>
               {ASSET_TYPE_LABELS[t]}
             </button>
           ))}
         </div>
         <div style={{ position: "relative" }}>
           <select value={companyFilter} onChange={e => setCompanyFilter(e.target.value)}
-            style={{ ...selectStyle, paddingRight: 32, minWidth: 160, appearance: "none", WebkitAppearance: "none", fontFamily: "ui-monospace, 'SF Mono', Menlo, monospace", color: "#7A776F", fontSize: 12 }}>
+            style={{ ...selectStyle, paddingRight: 32, minWidth: isMobile ? "100%" : 160, appearance: "none", WebkitAppearance: "none", fontFamily: "ui-monospace, 'SF Mono', Menlo, monospace", color: "#7A776F", fontSize: 12 }}>
             <option value="">All companies</option>
             {companiesInAssets.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
           </select>
@@ -1728,7 +1745,7 @@ function AssetsView({ assets, companies, jobs, onUpdate, onDelete }: {
         </div>
       )}
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8 }}>
+      <div style={{ display: "grid", gridTemplateColumns: isMobile ? "repeat(2, 1fr)" : "repeat(3, 1fr)", gap: 8 }}>
         {filtered.map(a => {
           const AIcon = ASSET_ICONS[a.type];
           const isPerson = a.type === "Person";
@@ -1777,6 +1794,7 @@ function AssetsView({ assets, companies, jobs, onUpdate, onDelete }: {
 type View = "jobs" | "companies" | "assets";
 
 export default function App() {
+  const isMobile = useIsMobile();
   const [view, setView] = useState<View>("jobs");
   const [companies, setCompanies] = useState<Company[]>([]);
   const [jobs, setJobs] = useState<Job[]>([]);
@@ -1860,28 +1878,46 @@ export default function App() {
     else setShowAddAsset(true);
   };
 
+  const MOBILE_TABS: { view: View; label: string; Icon: any }[] = [
+    { view: "jobs", label: "Jobs", Icon: Briefcase },
+    { view: "companies", label: "Companies", Icon: Building2 },
+    { view: "assets", label: "Assets", Icon: Paperclip },
+  ];
+
   return (
     <div style={{ minHeight: "100vh", background: C.bg, fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif", color: C.text }}>
-      {/* Top nav */}
-      <nav style={{ background: C.bg, borderBottom: `1px solid ${C.border}`, position: "sticky", top: 0, zIndex: 800, padding: "0 32px" }}>
-        <div style={{ maxWidth: 760, margin: "0 auto", display: "flex", alignItems: "center", height: 56 }}>
-          <div style={{ fontFamily: "var(--font-dm-serif), Georgia, serif", fontSize: 21, fontWeight: 400, color: C.text, marginRight: 28, letterSpacing: -0.5 }}>Job Tracker</div>
-          <div style={{ display: "flex", gap: 2, flex: 1 }}>
-            {(["jobs", "companies", "assets"] as View[]).map(v => (
-              <button key={v} onClick={() => navTo(v)}
-                style={{ padding: "6px 14px", borderRadius: 8, border: "none", cursor: "pointer", background: view === v ? "rgba(28,56,48,0.09)" : "transparent", color: view === v ? "#1C3830" : "#7A776F", fontSize: 14, fontWeight: 500, transition: "background .15s, color .15s", textTransform: "capitalize" as const }}>
-                {v}
-              </button>
-            ))}
+      {/* Desktop top nav — hidden on mobile */}
+      {!isMobile && (
+        <nav style={{ background: C.bg, borderBottom: `1px solid ${C.border}`, position: "sticky", top: 0, zIndex: 800, padding: "0 32px" }}>
+          <div style={{ maxWidth: 760, margin: "0 auto", display: "flex", alignItems: "center", height: 56 }}>
+            <div style={{ fontFamily: "var(--font-dm-serif), Georgia, serif", fontSize: 21, fontWeight: 400, color: C.text, marginRight: 28, letterSpacing: -0.5 }}>Job Tracker</div>
+            <div style={{ display: "flex", gap: 2, flex: 1 }}>
+              {(["jobs", "companies", "assets"] as View[]).map(v => (
+                <button key={v} onClick={() => navTo(v)}
+                  style={{ padding: "6px 14px", borderRadius: 8, border: "none", cursor: "pointer", background: view === v ? "rgba(28,56,48,0.09)" : "transparent", color: view === v ? "#1C3830" : "#7A776F", fontSize: 14, fontWeight: 500, transition: "background .15s, color .15s", textTransform: "capitalize" as const }}>
+                  {v}
+                </button>
+              ))}
+            </div>
+            <Btn onClick={newBtnAction} style={{ padding: "7px 16px", fontSize: 13 }}>
+              <Plus size={14} /> {newBtnLabel}
+            </Btn>
           </div>
-          <Btn onClick={newBtnAction} style={{ padding: "7px 16px", fontSize: 13 }}>
+        </nav>
+      )}
+
+      {/* Mobile top bar — shown on mobile only */}
+      {isMobile && (
+        <div style={{ background: C.bg, borderBottom: `1px solid ${C.border}`, position: "sticky", top: 0, zIndex: 800, padding: "0 16px", display: "flex", alignItems: "center", justifyContent: "space-between", height: 52 }}>
+          <div style={{ fontFamily: "var(--font-dm-serif), Georgia, serif", fontSize: 19, fontWeight: 400, color: C.text, letterSpacing: -0.5 }}>Job Tracker</div>
+          <button onClick={newBtnAction} style={{ background: C.green, color: "#fff", border: "none", borderRadius: 8, padding: "7px 12px", fontSize: 13, fontWeight: 500, cursor: "pointer", display: "flex", alignItems: "center", gap: 5 }}>
             <Plus size={14} /> {newBtnLabel}
-          </Btn>
+          </button>
         </div>
-      </nav>
+      )}
 
       {/* Main */}
-      <main style={{ padding: "28px 32px" }}>
+      <main style={{ padding: isMobile ? "20px 16px" : "28px 32px", paddingBottom: isMobile ? `calc(72px + env(safe-area-inset-bottom, 16px))` : "28px" }}>
         {loading && (
           <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "60vh", gap: 12, color: C.muted }}>
             <Loader2 size={22} className="animate-spin" /> Loading from Notion…
@@ -1957,6 +1993,21 @@ export default function App() {
           onClose={() => setShowAddAsset(false)}
           onSave={a => { setAssets(ast => [a, ...ast]); setShowAddAsset(false); }}
         />
+      )}
+
+      {/* Mobile bottom tab bar */}
+      {isMobile && (
+        <nav style={{ position: "fixed", bottom: 0, left: 0, right: 0, zIndex: 900, background: "#fff", borderTop: `1px solid ${C.border}`, display: "flex", paddingBottom: "env(safe-area-inset-bottom, 0px)" }}>
+          {MOBILE_TABS.map(({ view: v, label, Icon }) => {
+            const active = view === v;
+            return (
+              <button key={v} onClick={() => navTo(v)} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 4, padding: "10px 0", background: "none", border: "none", cursor: "pointer", color: active ? "#1B3A2F" : "#9CA3AF" }}>
+                <Icon size={22} strokeWidth={active ? 2 : 1.5} />
+                <span style={{ fontSize: 10, fontWeight: active ? 600 : 400, letterSpacing: 0.2 }}>{label}</span>
+              </button>
+            );
+          })}
+        </nav>
       )}
     </div>
   );
