@@ -1645,7 +1645,7 @@ function JobsView({ jobs, activities, onSelect }: {
           <Search size={14} style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", color: C.muted }} />
           <input style={{ ...inputStyle, paddingLeft: 34, width: "100%" }} placeholder="Search jobs…" value={search} onChange={e => setSearch(e.target.value)} />
         </div>
-        <div style={{ display: "flex", gap: 7, alignItems: "center", overflowX: isMobile ? "auto" : "visible", flexWrap: isMobile ? "nowrap" : "wrap", paddingBottom: isMobile ? 2 : 0 }}>
+        <div style={{ display: "flex", gap: 7, alignItems: "center", overflowX: isMobile ? "auto" : "visible", flexWrap: isMobile ? "nowrap" : "wrap", paddingBottom: isMobile ? 2 : 0, minWidth: 0, width: isMobile ? "100%" : undefined }}>
           {FILTERS.map(f => {
             const count = f === "All" ? activeJobs.length : activeJobs.filter(j => j.status === f).length;
             const active = filter === f;
@@ -1668,14 +1668,14 @@ function JobsView({ jobs, activities, onSelect }: {
       <div style={{ display: "grid", gap: 8 }}>
         {filtered.map(j => (
           <div key={j.id} onClick={() => onSelect(j)}
-            style={{ background: "#fff", borderRadius: 12, padding: isMobile ? "12px 16px" : "22px 20px", cursor: "pointer", border: `1px solid ${C.border}`, borderLeft: `3px solid ${STATUS_BORDER[j.status]}`, transition: "box-shadow .15s", display: "flex", alignItems: isMobile ? "flex-start" : "center", gap: 16 }}
+            style={{ background: "#fff", borderRadius: 12, padding: isMobile ? "12px 16px" : "22px 20px", cursor: "pointer", border: `1px solid ${C.border}`, borderLeft: `3px solid ${STATUS_BORDER[j.status]}`, transition: "box-shadow .15s", display: "flex", alignItems: isMobile ? "flex-start" : "center", gap: 16, minWidth: 0, overflow: "hidden" }}
             onMouseEnter={e => (e.currentTarget as HTMLDivElement).style.boxShadow = "0 2px 14px rgba(0,0,0,0.07)"}
             onMouseLeave={e => (e.currentTarget as HTMLDivElement).style.boxShadow = "none"}>
             <CompanyLogo name={j.companyName || "?"} logoUrl={j.companyLogoUrl || undefined} size={40} radius={10} />
             {isMobile ? (
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: 15, fontWeight: 500, color: C.text, marginBottom: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{j.name}</div>
-                <div style={{ fontSize: 13, color: C.muted, marginBottom: 8 }}>{j.companyName}{j.location ? ` · ${j.location}` : ""}</div>
+                <div style={{ fontSize: 13, color: C.muted, marginBottom: 8, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{j.companyName}{j.location ? ` · ${j.location}` : ""}</div>
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                   <StatusBadge status={j.status} />
                   {(() => { const d = lastActivity[j.id] || jobCreatedDate[j.id]; const fmt = d ? formatDate(d) : ""; return fmt ? <span style={{ fontSize: 11, color: C.muted }}>{fmt}</span> : null; })()}
