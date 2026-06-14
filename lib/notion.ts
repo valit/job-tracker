@@ -153,11 +153,17 @@ export function parseActivity(page: any): Activity {
   };
 }
 
+const ASSET_TYPE_COMPAT: Record<string, AssetType> = {
+  "Google Drive link": "Document",
+};
+
 export function parseAsset(page: any): Asset {
   const p = page.properties;
+  const rawType = getText(p.Type);
+  const resolvedType = (ASSET_TYPE_COMPAT[rawType] ?? rawType) as AssetType;
   return {
     id: page.id,
-    type: (getText(p.Type) as AssetType) || "URL",
+    type: resolvedType || "URL",
     label: getText(p.Label) || getText(p.Name),
     assetUrl: getText(p.URL),
     personName: getText(p["Person Name"]),
