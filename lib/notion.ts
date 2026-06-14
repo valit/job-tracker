@@ -24,9 +24,10 @@ export type ActivityType =
   | "Application submitted"
   | "Interview"
   | "Referral submitted"
-  | "Note";
+  | "Note"
+  | "Job created";
 
-export type AssetType = "URL" | "Gmail link" | "Google Drive link" | "Person";
+export type AssetType = "URL" | "Gmail link" | "Google Drive link" | "Contact";
 export type PersonTitle = "Recruiter" | "Hiring Manager" | "Interviewer" | "Referral" | "Connection";
 
 export interface CompanyLink {

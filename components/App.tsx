@@ -5,7 +5,7 @@ import {
   Plus, X, ExternalLink, ChevronRight, ChevronLeft, ChevronDown,
   Search, Loader2, Mail, Phone, Video, FileText, MessageSquare, Star,
   ArrowUpRight, Check, AlertCircle, Link, User, Trash2,
-  Send, Pencil, Building2, Briefcase, Paperclip, Globe, Archive,
+  Send, Pencil, Building2, Briefcase, Paperclip, Globe, Archive, FilePlus,
 } from "lucide-react";
 
 // ── Mobile hook ───────────────────────────────────────────────────────────
@@ -57,6 +57,7 @@ const ACTIVITY_ICONS: Record<ActivityType, any> = {
   "Interview": Star,
   "Referral submitted": ArrowUpRight,
   "Note": MessageSquare,
+  "Job created": FilePlus,
 };
 
 const ACTIVITY_COLORS: Record<ActivityType, string> = {
@@ -68,27 +69,28 @@ const ACTIVITY_COLORS: Record<ActivityType, string> = {
   "Interview": "#DC2626",
   "Referral submitted": "#F97316",
   "Note": "#9CA3AF",
+  "Job created": "#9CA3AF",
 };
 
 const ASSET_ICONS: Record<AssetType, any> = {
   "URL": Link,
   "Gmail link": Mail,
   "Google Drive link": FileText,
-  "Person": User,
+  "Contact": User,
 };
 
 const ASSET_COLORS: Record<AssetType, string> = {
   "URL": "#6B7280",
   "Gmail link": "#16A34A",
   "Google Drive link": "#EA580C",
-  "Person": "#6B7280",
+  "Contact": "#6B7280",
 };
 
 const ASSET_BG: Record<AssetType, string> = {
   "URL": "#F3F4F6",
   "Gmail link": "#DCFCE7",
   "Google Drive link": "#FFEDD5",
-  "Person": "#F3F4F6",
+  "Contact": "#F3F4F6",
 };
 
 const PERSON_TITLES: PersonTitle[] = ["Recruiter", "Hiring Manager", "Interviewer", "Referral", "Connection"];
@@ -173,6 +175,181 @@ const inputStyle: React.CSSProperties = {
 const selectStyle: React.CSSProperties = { ...inputStyle };
 const textareaStyle: React.CSSProperties = { ...inputStyle, minHeight: 88, resize: "vertical" as const, lineHeight: 1.6 };
 
+// ── Mention helpers ────────────────────────────────────────────────────────
+
+const MENTION_RE = /@\[([^\]]+)\]\(asset:([^)]+)\)/g;
+
+function parseMentions(text: string): Array<{ type: "text" | "mention"; value: string; label?: string; assetId?: string }> {
+  const parts: Array<{ type: "text" | "mention"; value: string; label?: string; assetId?: string }> = [];
+  let last = 0;
+  let m: RegExpExecArray | null;
+  MENTION_RE.lastIndex = 0;
+  while ((m = MENTION_RE.exec(text)) !== null) {
+    if (m.index > last) parts.push({ type: "text", value: text.slice(last, m.index) });
+    parts.push({ type: "mention", value: m[0], label: m[1], assetId: m[2] });
+    last = m.index + m[0].length;
+  }
+  if (last < text.length) parts.push({ type: "text", value: text.slice(last) });
+  return parts;
+}
+
+function NotesWithMentions({ notes, allAssets, onOpenAsset }: {
+  notes: string;
+  allAssets: Asset[];
+  onOpenAsset: (a: Asset) => void;
+}) {
+  if (!notes) return null;
+  const parts = parseMentions(notes);
+  return (
+    <span>
+      {parts.map((p, i) => {
+        if (p.type === "text") return <span key={i}>{p.value}</span>;
+        const asset = allAssets.find(a => a.id === p.assetId);
+        return (
+          <span
+            key={i}
+            onClick={e => { e.stopPropagation(); if (asset) onOpenAsset(asset); }}
+            style={{ textDecoration: "underline", textDecorationColor: "#1C1917", color: "#1C1917", cursor: asset ? "pointer" : "default", textUnderlineOffset: 2 }}
+            title={asset ? undefined : "Asset not found"}
+          >
+            {p.label}
+          </span>
+        );
+      })}
+    </span>
+  );
+}
+
+function MentionTextarea({ value, onChange, placeholder, assets }: {
+  value: string;
+  onChange: (v: string) => void;
+  placeholder?: string;
+  assets: Asset[];
+}) {
+  const taRef = useRef<HTMLTextAreaElement>(null);
+  const [mentionStart, setMentionStart] = useState<number | null>(null);
+  const [query, setQuery] = useState("");
+  const [selectedIdx, setSelectedIdx] = useState(0);
+  const [dropdownPos, setDropdownPos] = useState({ top: 0, left: 0, width: 0 });
+
+  const filtered = assets.filter(a => a.label.toLowerCase().includes(query.toLowerCase()));
+  const isOpen = mentionStart !== null;
+
+  const updateDropdownPos = () => {
+    const ta = taRef.current;
+    if (!ta) return;
+    const rect = ta.getBoundingClientRect();
+    setDropdownPos({ top: rect.bottom + window.scrollY + 4, left: rect.left + window.scrollX, width: rect.width });
+  };
+
+  const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const v = e.target.value;
+    const cur = e.target.selectionStart ?? v.length;
+    onChange(v);
+    const textBefore = v.slice(0, cur);
+    const atIdx = textBefore.lastIndexOf("@");
+    if (atIdx !== -1) {
+      const segment = textBefore.slice(atIdx + 1);
+      if (!/[\s]/.test(segment)) {
+        setMentionStart(atIdx);
+        setQuery(segment);
+        setSelectedIdx(0);
+        updateDropdownPos();
+        return;
+      }
+    }
+    setMentionStart(null);
+    setQuery("");
+  };
+
+  const insertMention = (asset: Asset) => {
+    const ta = taRef.current;
+    if (!ta || mentionStart === null) return;
+    const cur = ta.selectionStart ?? value.length;
+    const before = value.slice(0, mentionStart);
+    const after = value.slice(cur);
+    const inserted = `@[${asset.label}](asset:${asset.id}) `;
+    onChange(before + inserted + after);
+    setMentionStart(null);
+    setQuery("");
+    setTimeout(() => {
+      ta.focus();
+      const pos = before.length + inserted.length;
+      ta.setSelectionRange(pos, pos);
+    }, 0);
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (!isOpen) return;
+    if (e.key === "ArrowDown") { e.preventDefault(); setSelectedIdx(i => Math.min(i + 1, Math.max(filtered.length - 1, 0))); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); setSelectedIdx(i => Math.max(i - 1, 0)); }
+    else if (e.key === "Enter" || e.key === "Tab") {
+      if (filtered.length > 0) { e.preventDefault(); insertMention(filtered[selectedIdx] ?? filtered[0]); }
+    }
+    else if (e.key === "Escape") { e.preventDefault(); setMentionStart(null); setQuery(""); }
+  };
+
+  const overlayRef = useRef<HTMLDivElement>(null);
+  const syncScroll = () => {
+    if (overlayRef.current && taRef.current) overlayRef.current.scrollTop = taRef.current.scrollTop;
+  };
+
+  const sharedStyle: React.CSSProperties = {
+    fontSize: 14, lineHeight: 1.6, padding: "9px 12px",
+    border: `1px solid ${C.border}`, borderRadius: 8,
+    boxSizing: "border-box", width: "100%", minHeight: 88,
+    whiteSpace: "pre-wrap", wordBreak: "break-word", overflowWrap: "break-word",
+    fontFamily: "inherit",
+  };
+
+  const renderOverlay = () => {
+    const parts = parseMentions(value);
+    return parts.map((p, i) =>
+      p.type === "text"
+        ? <span key={i} style={{ color: C.text }}>{p.value}</span>
+        : <span key={i} style={{ background: "#1C1917", color: "#fff", borderRadius: 5, padding: "1px 4px" }}>{p.value}</span>
+    );
+  };
+
+  return (
+    <div style={{ position: "relative" }}>
+      <div ref={overlayRef} aria-hidden style={{ ...sharedStyle, position: "absolute", inset: 0, overflow: "hidden", pointerEvents: "none", zIndex: 0, background: "#fff" }}>
+        {renderOverlay()}{"\n"}
+      </div>
+      <textarea
+        ref={taRef}
+        style={{ ...sharedStyle, position: "relative", zIndex: 1, background: "transparent", color: "transparent", caretColor: C.text, resize: "vertical", outline: "none" }}
+        value={value}
+        onChange={handleChange}
+        onKeyDown={handleKeyDown}
+        onScroll={syncScroll}
+        onBlur={() => setTimeout(() => { setMentionStart(null); setQuery(""); }, 150)}
+        placeholder={placeholder}
+        spellCheck={false}
+      />
+      {isOpen && (
+        <div style={{ position: "fixed", top: dropdownPos.top, left: dropdownPos.left, width: dropdownPos.width, background: "#fff", border: `1px solid ${C.border}`, borderRadius: 8, boxShadow: "0 4px 16px rgba(0,0,0,0.1)", zIndex: 2000, maxHeight: 220, overflow: "auto" }}>
+          {filtered.length === 0 ? (
+            <div style={{ padding: "10px 14px", fontSize: 13, color: C.muted }}>{assets.length === 0 ? "No assets available" : "No matching assets"}</div>
+          ) : (
+            filtered.map((a, i) => {
+              const AIcon = ASSET_ICONS[a.type] || Link;
+              return (
+                <div key={a.id} onMouseDown={e => { e.preventDefault(); insertMention(a); }}
+                  style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 14px", cursor: "pointer", background: i === selectedIdx ? C.bg : "#fff", fontSize: 13, color: C.text }}
+                  onMouseEnter={() => setSelectedIdx(i)}>
+                  <AIcon size={13} color={C.muted} />
+                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{a.label}</span>
+                </div>
+              );
+            })
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div style={{ marginBottom: 16 }}>
@@ -201,15 +378,52 @@ function Modal({ title, onClose, onBack, children, width = 560 }: {
   children: React.ReactNode; width?: number;
 }) {
   const isMobile = useIsMobile();
+  const [entered, setEntered] = useState(false);
+
+  useEffect(() => {
+    requestAnimationFrame(() => setEntered(true));
+  }, []);
+
   useEffect(() => {
     const handler = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
   }, [onClose]);
+
+  if (isMobile) {
+    return (
+      <div
+        style={{ position: "fixed", inset: 0, zIndex: 1000, pointerEvents: "auto" }}
+        onClick={onClose}
+      >
+        {/* backdrop */}
+        <div style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.4)", opacity: entered ? 1 : 0, transition: "opacity 250ms ease-out" }} />
+        {/* sheet */}
+        <div
+          style={{ position: "absolute", bottom: 0, left: 0, right: 0, background: "#fff", borderRadius: "16px 16px 0 0", maxHeight: "90vh", overflow: "auto", transform: entered ? "translateY(0)" : "translateY(100%)", transition: "transform 250ms ease-out" }}
+          onClick={e => e.stopPropagation()}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "20px 20px 0", position: "sticky", top: 0, background: "#fff", zIndex: 1, borderBottom: `1px solid ${C.border}`, paddingBottom: 16 }}>
+            {onBack && (
+              <button onClick={onBack} style={{ background: "none", border: "none", cursor: "pointer", color: C.muted, padding: 4, display: "flex", flexShrink: 0 }}>
+                <ChevronLeft size={18} />
+              </button>
+            )}
+            <h2 style={{ fontSize: 18, fontWeight: 600, color: C.text, flex: 1, fontFamily: "Georgia, 'Times New Roman', serif" }}>{title}</h2>
+            <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: C.muted, padding: 4, display: "flex", flexShrink: 0 }}>
+              <X size={18} />
+            </button>
+          </div>
+          <div style={{ padding: "20px 20px 24px" }}>{children}</div>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", zIndex: 1000, display: "flex", alignItems: isMobile ? "flex-end" : "center", justifyContent: "center", padding: isMobile ? 0 : 16 }} onClick={onClose}>
-      <div style={{ background: "#fff", borderRadius: isMobile ? "16px 16px 0 0" : 12, width: "100%", maxWidth: isMobile ? "100%" : width, maxHeight: isMobile ? "92vh" : "90vh", overflow: "auto", boxShadow: "0 4px 24px rgba(0,0,0,0.08)" }} onClick={e => e.stopPropagation()}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: isMobile ? "20px 20px 0" : "20px 24px 0", position: "sticky", top: 0, background: "#fff", zIndex: 1, borderBottom: isMobile ? `1px solid ${C.border}` : "none", paddingBottom: isMobile ? 16 : 0 }}>
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 16, opacity: entered ? 1 : 0, transition: "opacity 150ms ease" }} onClick={onClose}>
+      <div style={{ background: "#fff", borderRadius: 12, width: "100%", maxWidth: width, maxHeight: "90vh", overflow: "auto", boxShadow: "0 4px 24px rgba(0,0,0,0.08)" }} onClick={e => e.stopPropagation()}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "20px 24px 0", position: "sticky", top: 0, background: "#fff", zIndex: 1 }}>
           {onBack && (
             <button onClick={onBack} style={{ background: "none", border: "none", cursor: "pointer", color: C.muted, padding: 4, display: "flex", flexShrink: 0 }}>
               <ChevronLeft size={18} />
@@ -220,7 +434,7 @@ function Modal({ title, onClose, onBack, children, width = 560 }: {
             <X size={18} />
           </button>
         </div>
-        <div style={{ padding: isMobile ? "20px 20px 24px" : "20px 24px 24px" }}>{children}</div>
+        <div style={{ padding: "20px 24px 24px" }}>{children}</div>
       </div>
     </div>
   );
@@ -311,7 +525,7 @@ type AddJobStep = "pick" | "url" | "paste" | "review";
 function AddJobModal({ companies, onClose, onSave }: {
   companies: Company[];
   onClose: () => void;
-  onSave: (j: Job, newCompany?: Company, newAsset?: Asset) => void;
+  onSave: (j: Job, newCompany?: Company, newAsset?: Asset, createdActivity?: Activity) => void;
 }) {
   const [step, setStep] = useState<AddJobStep>("pick");
   const [urlInput, setUrlInput] = useState("");
@@ -400,8 +614,14 @@ function AddJobModal({ companies, onClose, onSave }: {
         const assetData = await assetRes.json();
         if (!assetData.error) newAsset = assetData;
       }
+      const actRes = await fetch("/api/activities", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type: "Job created", date: today(), notes: "", jobId: job.id }),
+      });
+      const actData = await actRes.json();
+      const createdActivity: Activity | undefined = actData.error ? undefined : { ...actData, jobName: form.name };
       const co = newCompanyObj || companies.find(c => c.id === companyId);
-      onSave({ ...job, companyName: co?.name || form.companyName }, newCompanyObj, newAsset);
+      onSave({ ...job, companyName: co?.name || form.companyName }, newCompanyObj, newAsset, createdActivity);
       onClose();
     }
     setSaving(false);
@@ -524,10 +744,11 @@ const ACTIVITY_PILL_TYPES: { type: ActivityType; label: string }[] = [
   { type: "Note", label: "Note" },
 ];
 
-function EditActivityModal({ activity, onClose, onSave, onDelete }: {
+function EditActivityModal({ activity, onClose, onSave, onDelete, assets = [] }: {
   activity: Activity; onClose: () => void;
   onSave: (a: Activity) => void;
   onDelete: (id: string) => void;
+  assets?: Asset[];
 }) {
   const [form, setForm] = useState({ type: activity.type, date: activity.date, notes: activity.notes });
   const [saving, setSaving] = useState(false);
@@ -571,7 +792,7 @@ function EditActivityModal({ activity, onClose, onSave, onDelete }: {
         <input style={inputStyle} type="date" value={form.date} onChange={e => setForm(f => ({ ...f, date: e.target.value }))} />
       </Field>
       <Field label="Notes">
-        <textarea style={textareaStyle} value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} placeholder="Details, call notes, email content…" />
+        <MentionTextarea value={form.notes} onChange={v => setForm(f => ({ ...f, notes: v }))} placeholder="Details, call notes, email content…" assets={assets} />
       </Field>
       <div style={{ display: "flex", gap: 10, marginBottom: 16 }}>
         <Btn onClick={save} disabled={saving}>
@@ -594,8 +815,8 @@ function EditActivityModal({ activity, onClose, onSave, onDelete }: {
   );
 }
 
-function AddActivityModal({ jobId, jobName, onClose, onSave }: {
-  jobId: string; jobName: string; onClose: () => void; onSave: (a: Activity) => void;
+function AddActivityModal({ jobId, jobName, onClose, onSave, assets = [] }: {
+  jobId: string; jobName: string; onClose: () => void; onSave: (a: Activity) => void; assets?: Asset[];
 }) {
   const [form, setForm] = useState({ type: "Note" as ActivityType, date: today(), notes: "" });
   const [saving, setSaving] = useState(false);
@@ -640,7 +861,7 @@ function AddActivityModal({ jobId, jobName, onClose, onSave }: {
         <input style={inputStyle} type="date" value={form.date} onChange={e => setForm(f => ({ ...f, date: e.target.value }))} />
       </Field>
       <Field label="Notes">
-        <textarea style={textareaStyle} value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} placeholder="Details, call notes, email content…" />
+        <MentionTextarea value={form.notes} onChange={v => setForm(f => ({ ...f, notes: v }))} placeholder="Details, call notes, email content…" assets={assets} />
       </Field>
       <div style={{ display: "flex", gap: 10 }}>
         <Btn onClick={save} disabled={saving}>
@@ -716,7 +937,7 @@ function AddAssetModal({ companies, jobs, linkTo, onClose, onSave }: {
   });
   const [saving, setSaving] = useState(false);
   const u = (k: string) => (e: any) => setForm((f: any) => ({ ...f, [k]: e.target.value }));
-  const isPerson = assetType === "Person";
+  const isPerson = assetType === "Contact";
 
   const save = async () => {
     if (assetType === "Gmail link" && !form.label.trim()) {
@@ -727,7 +948,7 @@ function AddAssetModal({ companies, jobs, linkTo, onClose, onSave }: {
     const payload = { ...form, type: assetType };
     if (!payload.label) {
       payload.label = isPerson
-        ? (payload.personName || "Person")
+        ? (payload.personName || "Contact")
         : (payload.assetUrl.slice(0, 60) + (payload.assetUrl.length > 60 ? "…" : "") || assetType);
     }
     const res = await fetch("/api/assets", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
@@ -740,7 +961,7 @@ function AddAssetModal({ companies, jobs, linkTo, onClose, onSave }: {
     { type: "URL", label: "URL", sub: "A link to a job posting or resource" },
     { type: "Gmail link", label: "Gmail", sub: "An email thread or conversation" },
     { type: "Google Drive link", label: "Google Drive", sub: "A document, resume, or file" },
-    { type: "Person", label: "Person", sub: "A contact: recruiter, HM, referral" },
+    { type: "Contact", label: "Contact", sub: "A contact: recruiter, HM, referral" },
   ];
 
   if (step === "pick") return (
@@ -830,9 +1051,10 @@ function AddAssetModal({ companies, jobs, linkTo, onClose, onSave }: {
 
 // ── Edit Asset Modal (view + edit) ─────────────────────────────────────────
 
-function EditAssetModal({ asset, companies, jobs, onClose, onSave, onDelete }: {
+function EditAssetModal({ asset, companies, jobs, onClose, onSave, onDelete, onNavigateCompany, onNavigateJob }: {
   asset: Asset; companies: Company[]; jobs: Job[];
   onClose: () => void; onSave: (updated: Asset) => void; onDelete: (id: string) => void;
+  onNavigateCompany?: (c: Company) => void; onNavigateJob?: (j: Job) => void;
 }) {
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState<any>({
@@ -847,7 +1069,7 @@ function EditAssetModal({ asset, companies, jobs, onClose, onSave, onDelete }: {
   const [deleting, setDeleting] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const u = (k: string) => (e: any) => setForm((f: any) => ({ ...f, [k]: e.target.value }));
-  const isPerson = asset.type === "Person";
+  const isPerson = asset.type === "Contact";
   const isMobile = useIsMobile();
   useEffect(() => {
     const handler = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
@@ -916,7 +1138,9 @@ function EditAssetModal({ asset, companies, jobs, onClose, onSave, onDelete }: {
                 <a href={asset.assetUrl} target="_blank" rel="noreferrer"
                   style={{ fontSize: 13, color: "#2563EB", textDecoration: "none", display: "flex", alignItems: "center", gap: 6, overflow: "hidden", maxWidth: 320 }}>
                   <ExternalLink size={13} style={{ flexShrink: 0 }} />
-                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{asset.assetUrl}</span>
+                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {asset.type === "Gmail link" ? "Open in Gmail" : asset.assetUrl}
+                  </span>
                 </a>
               </div>
             ) : null
@@ -955,12 +1179,22 @@ function EditAssetModal({ asset, companies, jobs, onClose, onSave, onDelete }: {
               <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: C.muted, textTransform: "uppercase", letterSpacing: 0.8, marginBottom: 8 }}>Attached to</label>
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                 {linkedCompany && (
-                  <div style={{ display: "inline-flex", alignItems: "center", gap: 6, background: C.bg, border: `1px solid ${C.border}`, borderRadius: 8, padding: "5px 10px", fontSize: 13 }}>
+                  <div
+                    onClick={onNavigateCompany ? () => { onClose(); onNavigateCompany(linkedCompany); } : undefined}
+                    style={{ display: "inline-flex", alignItems: "center", gap: 6, background: C.bg, border: `1px solid ${C.border}`, borderRadius: 8, padding: "5px 10px", fontSize: 13, cursor: onNavigateCompany ? "pointer" : "default", transition: "background .15s" }}
+                    onMouseEnter={e => { if (onNavigateCompany) (e.currentTarget as HTMLDivElement).style.background = "#DDE2E6"; }}
+                    onMouseLeave={e => { if (onNavigateCompany) (e.currentTarget as HTMLDivElement).style.background = C.bg; }}
+                  >
                     <CompanyLogo name={linkedCompany.name} size={18} radius={4} /> {linkedCompany.name}
                   </div>
                 )}
                 {linkedJob && (
-                  <div style={{ display: "inline-flex", alignItems: "center", gap: 6, background: C.bg, border: `1px solid ${C.border}`, borderRadius: 8, padding: "10px 12px", fontSize: 13, maxWidth: 340, overflow: "hidden" }}>
+                  <div
+                    onClick={onNavigateJob ? () => { onClose(); onNavigateJob(linkedJob); } : undefined}
+                    style={{ display: "inline-flex", alignItems: "center", gap: 6, background: C.bg, border: `1px solid ${C.border}`, borderRadius: 8, padding: "10px 12px", fontSize: 13, maxWidth: 340, overflow: "hidden", cursor: onNavigateJob ? "pointer" : "default", transition: "background .15s" }}
+                    onMouseEnter={e => { if (onNavigateJob) (e.currentTarget as HTMLDivElement).style.background = "#DDE2E6"; }}
+                    onMouseLeave={e => { if (onNavigateJob) (e.currentTarget as HTMLDivElement).style.background = C.bg; }}
+                  >
                     <Briefcase size={13} color={C.muted} style={{ flexShrink: 0 }} />
                     <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{linkedJob.name}</span>
                   </div>
@@ -1024,12 +1258,14 @@ function EditAssetModal({ asset, companies, jobs, onClose, onSave, onDelete }: {
 
 // ── Job Detail Page ────────────────────────────────────────────────────────
 
-function JobDetailPage({ job, companies, jobs, onBack, onStatusChange, onDelete, onJobUpdate }: {
-  job: Job; companies: Company[]; jobs: Job[];
+function JobDetailPage({ job, companies, jobs, activities, assets, onBack, onStatusChange, onDelete, onJobUpdate, onNavigateCompany, onNavigateJob }: {
+  job: Job; companies: Company[]; jobs: Job[]; activities: Activity[]; assets: Asset[];
   onBack: () => void;
   onStatusChange: (id: string, s: JobStatus) => void;
   onDelete: (id: string) => void;
   onJobUpdate: (updated: Job) => void;
+  onNavigateCompany?: (c: Company) => void;
+  onNavigateJob?: (j: Job) => void;
 }) {
   const [myActivities, setMyActivities] = useState<Activity[]>([]);
   const [myAssets, setMyAssets] = useState<Asset[]>([]);
@@ -1054,11 +1290,17 @@ function JobDetailPage({ job, companies, jobs, onBack, onStatusChange, onDelete,
 
   useEffect(() => {
     setLoadingPanel(true);
+    if (MOCK_MODE) {
+      setMyActivities(activities.filter(a => a.jobId === job.id).sort((a, b) => a.date.localeCompare(b.date)));
+      setMyAssets(assets.filter(a => a.jobId === job.id));
+      setLoadingPanel(false);
+      return;
+    }
     Promise.all([
       fetch(`/api/activities?jobId=${job.id}`).then(r => r.json()),
       fetch(`/api/assets?jobId=${job.id}`).then(r => r.json()),
     ]).then(([acts, asts]) => {
-      setMyActivities(Array.isArray(acts) ? acts.sort((a: Activity, b: Activity) => b.date.localeCompare(a.date)) : []);
+      setMyActivities(Array.isArray(acts) ? acts.sort((a: Activity, b: Activity) => a.date.localeCompare(b.date)) : []);
       setMyAssets(Array.isArray(asts) ? asts : []);
     }).finally(() => setLoadingPanel(false));
   }, [job.id]);
@@ -1223,7 +1465,7 @@ function JobDetailPage({ job, companies, jobs, onBack, onStatusChange, onDelete,
           <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
             {myAssets.map(a => {
               const AIcon = ASSET_ICONS[a.type];
-              const rawLabel = a.type === "Person" ? (a.personName || a.label) : a.label;
+              const rawLabel = a.type === "Contact" ? (a.personName || a.label) : a.label;
               const label = (a.type === "Gmail link" && rawLabel.startsWith("http")) ? "Gmail thread" : rawLabel;
               return (
                 <button key={a.id} onClick={() => setEditingAsset(a)}
@@ -1263,7 +1505,7 @@ function JobDetailPage({ job, companies, jobs, onBack, onStatusChange, onDelete,
                   onMouseLeave={() => setHoveredActivityId(null)}
                   style={{ display: "flex", gap: 14, marginBottom: 24, position: "relative" }}>
                   {i < myActivities.length - 1 && (
-                    <div style={{ position: "absolute", left: 17, top: 36, bottom: -24, width: 1, background: C.border }} />
+                    <div style={{ position: "absolute", left: 17, top: 36, bottom: -24, width: 1, background: "#A8A29E" }} />
                   )}
                   <div style={{ width: 36, height: 36, borderRadius: "50%", background: color + "18", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, zIndex: 1 }}>
                     <AIcon size={15} color={color} />
@@ -1272,16 +1514,18 @@ function JobDetailPage({ job, companies, jobs, onBack, onStatusChange, onDelete,
                     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
                       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                         <span style={{ fontSize: 14, fontWeight: 400, color: C.text }}>{a.type}</span>
-                        <button onClick={() => setEditingActivity(a)}
-                          style={{ background: "none", border: "none", cursor: "pointer", padding: 2, color: C.muted, display: "flex", opacity: hoveredActivityId === a.id ? 1 : 0, transition: "opacity .15s" }}>
-                          <Pencil size={13} />
-                        </button>
+                        {a.type !== "Job created" && (
+                          <button onClick={() => setEditingActivity(a)}
+                            style={{ background: "none", border: "none", cursor: "pointer", padding: 2, color: C.muted, display: "flex", opacity: hoveredActivityId === a.id ? 1 : 0, transition: "opacity .15s" }}>
+                            <Pencil size={13} />
+                          </button>
+                        )}
                       </div>
                       <span style={{ fontSize: 12, color: C.muted }}>{formatDate(a.date)}</span>
                     </div>
                     {a.notes && (
                       <div style={{ fontSize: 14, color: C.muted, lineHeight: 1.6 }}>
-                        {a.notes}
+                        <NotesWithMentions notes={a.notes} allAssets={[...myAssets, ...assets.filter(ast => ast.companyId === job.companyId && !myAssets.find(m => m.id === ast.id))]} onOpenAsset={setEditingAsset} />
                       </div>
                     )}
                   </div>
@@ -1310,6 +1554,7 @@ function JobDetailPage({ job, companies, jobs, onBack, onStatusChange, onDelete,
           onClose={() => setEditingActivity(null)}
           onSave={updated => setMyActivities(acts => acts.map(a => a.id === updated.id ? updated : a))}
           onDelete={id => setMyActivities(acts => acts.filter(a => a.id !== id))}
+          assets={[...myAssets, ...assets.filter(ast => ast.companyId === job.companyId && !myAssets.find(m => m.id === ast.id))]}
         />
       )}
 
@@ -1323,9 +1568,10 @@ function JobDetailPage({ job, companies, jobs, onBack, onStatusChange, onDelete,
       {showAddActivity && (
         <AddActivityModal
           jobId={job.id} jobName={job.name}
+          assets={[...myAssets, ...assets.filter(ast => ast.companyId === job.companyId && !myAssets.find(m => m.id === ast.id))]}
           onClose={() => setShowAddActivity(false)}
           onSave={async a => {
-            setMyActivities(acts => [a, ...acts].sort((x, y) => y.date.localeCompare(x.date)));
+            setMyActivities(acts => [a, ...acts].sort((x, y) => x.date.localeCompare(y.date)));
             setShowAddActivity(false);
             const newStatus = deriveStatusChange(a.type, job.status);
             if (newStatus) {
@@ -1353,6 +1599,8 @@ function JobDetailPage({ job, companies, jobs, onBack, onStatusChange, onDelete,
           onClose={() => setEditingAsset(null)}
           onSave={updated => { setMyAssets(asts => asts.map(a => a.id === updated.id ? updated : a)); setEditingAsset(null); }}
           onDelete={id => { setMyAssets(asts => asts.filter(a => a.id !== id)); setEditingAsset(null); }}
+          onNavigateCompany={onNavigateCompany}
+          onNavigateJob={onNavigateJob}
         />
       )}
     </div>
@@ -1381,8 +1629,10 @@ function JobsView({ jobs, activities, onSelect }: {
   });
 
   const lastActivity: Record<string, string> = {};
+  const jobCreatedDate: Record<string, string> = {};
   activities.forEach(a => {
     if (!lastActivity[a.jobId] || a.date > lastActivity[a.jobId]) lastActivity[a.jobId] = a.date;
+    if (a.type === "Job created") jobCreatedDate[a.jobId] = a.date;
   });
 
   const FILTERS: (JobStatus | "All")[] = ["All", "Want to apply", "Applied (no response)", "Applied (referred)", "In progress", "Closed"];
@@ -1428,7 +1678,7 @@ function JobsView({ jobs, activities, onSelect }: {
                 <div style={{ fontSize: 13, color: C.muted, marginBottom: 8 }}>{j.companyName}{j.location ? ` · ${j.location}` : ""}</div>
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                   <StatusBadge status={j.status} />
-                  {(() => { const d = (lastActivity[j.id] || j.createdAt); const fmt = d ? formatDate(d) : ""; return fmt ? <span style={{ fontSize: 11, color: C.muted }}>{fmt}</span> : null; })()}
+                  {(() => { const d = lastActivity[j.id] || jobCreatedDate[j.id]; const fmt = d ? formatDate(d) : ""; return fmt ? <span style={{ fontSize: 11, color: C.muted }}>{fmt}</span> : null; })()}
                 </div>
               </div>
             ) : (
@@ -1439,7 +1689,7 @@ function JobsView({ jobs, activities, onSelect }: {
                 </div>
                 <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 9, flexShrink: 0 }}>
                   <StatusBadge status={j.status} />
-                  {(() => { const d = (lastActivity[j.id] || j.createdAt); const fmt = d ? formatDate(d) : ""; return fmt ? <span style={{ fontSize: 11, color: C.muted }}>{fmt}</span> : null; })()}
+                  {(() => { const d = lastActivity[j.id] || jobCreatedDate[j.id]; const fmt = d ? formatDate(d) : ""; return fmt ? <span style={{ fontSize: 11, color: C.muted }}>{fmt}</span> : null; })()}
                 </div>
               </>
             )}
@@ -1666,26 +1916,19 @@ function CompaniesView({ companies, jobs, onSelect }: {
 
       <div style={{ display: "grid", gap: 8 }}>
         {filtered.map(c => {
-          const cJobs = jobs.filter(j => j.companyId === c.id);
-          const hasActive = cJobs.some(j => !j.archived && j.status !== "Closed");
-          const inactive = cJobs.length === 0 || !hasActive;
+          const openCount = jobs.filter(j => j.companyId === c.id && !j.archived && j.status !== "Closed").length;
+          const openLabel = openCount === 0 ? "No open jobs" : openCount === 1 ? "1 open job" : `${openCount} open jobs`;
           return (
             <div key={c.id} onClick={() => onSelect(c)}
-              style={{ background: "#fff", borderRadius: 12, padding: "22px 20px", cursor: "pointer", border: `1px solid ${C.border}`, transition: "box-shadow .15s", display: "flex", alignItems: "center", gap: 14, opacity: inactive ? 0.55 : 1 }}
+              style={{ background: "#fff", borderRadius: 12, padding: "22px 20px", cursor: "pointer", border: `1px solid ${C.border}`, transition: "box-shadow .15s", display: "flex", alignItems: "center", gap: 14 }}
               onMouseEnter={e => (e.currentTarget as HTMLDivElement).style.boxShadow = "0 2px 14px rgba(0,0,0,0.07)"}
               onMouseLeave={e => (e.currentTarget as HTMLDivElement).style.boxShadow = "none"}>
               <CompanyLogo name={c.name} logoUrl={c.logoUrl || undefined} size={40} radius={10} />
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 2 }}>
-                  <span style={{ fontSize: 15, fontWeight: 600, color: C.text }}>{c.name}</span>
-                  {inactive && <span style={{ fontSize: 11, color: C.muted, background: C.border, borderRadius: 20, padding: "2px 8px" }}>No active roles</span>}
-                </div>
-                {c.notes && <div style={{ fontSize: 13, color: C.muted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.notes}</div>}
+                <div style={{ fontSize: 15, fontWeight: 600, color: C.text, marginBottom: 2 }}>{c.name}</div>
+                <div style={{ fontSize: 13, color: C.muted }}>{openLabel}</div>
               </div>
-              <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0, color: C.muted, fontSize: 13 }}>
-                {cJobs.length > 0 && <span style={{ display: "flex", alignItems: "center", gap: 3 }}><Briefcase size={13} />{cJobs.length}</span>}
-                <ChevronRight size={16} />
-              </div>
+              <ChevronRight size={16} color={C.muted} style={{ flexShrink: 0 }} />
             </div>
           );
         })}
@@ -1701,13 +1944,15 @@ const ASSET_TYPE_LABELS: Record<string, string> = {
   "URL": "URL",
   "Gmail link": "Gmail",
   "Google Drive link": "Google Drive",
-  "Person": "Person",
+  "Contact": "Contact",
 };
 
-function AssetsView({ assets, companies, jobs, onUpdate, onDelete }: {
+function AssetsView({ assets, companies, jobs, onUpdate, onDelete, onNavigateCompany, onNavigateJob }: {
   assets: Asset[]; companies: Company[]; jobs: Job[];
   onUpdate: (updated: Asset) => void;
   onDelete: (id: string) => void;
+  onNavigateCompany?: (c: Company) => void;
+  onNavigateJob?: (j: Job) => void;
 }) {
   const [typeFilter, setTypeFilter] = useState<AssetType | "All">("All");
   const [companyFilter, setCompanyFilter] = useState("");
@@ -1735,7 +1980,7 @@ function AssetsView({ assets, companies, jobs, onUpdate, onDelete }: {
     <div style={{ maxWidth: isMobile ? "100%" : 760, margin: "0 auto" }}>
       <div style={{ display: "flex", flexDirection: isMobile ? "column" : "row", alignItems: isMobile ? "stretch" : "center", justifyContent: "space-between", gap: 10, marginBottom: 20 }}>
         <div style={{ display: "flex", gap: 8, overflowX: isMobile ? "auto" : "visible", flexWrap: isMobile ? "nowrap" : "wrap", paddingBottom: isMobile ? 2 : 0 }}>
-          {(["All", "URL", "Gmail link", "Google Drive link", "Person"] as const).map(t => (
+          {(["All", "URL", "Gmail link", "Google Drive link", "Contact"] as const).map(t => (
             <button key={t} onClick={() => setTypeFilter(t as any)}
               style={{ borderRadius: 20, padding: "7px 16px", fontSize: 12, fontWeight: 500, cursor: "pointer", border: "1.5px solid rgba(23,23,26,0.18)", background: typeFilter === t ? "#1C3830" : "transparent", color: typeFilter === t ? "#fff" : "#7A776F", transition: "all .1s", fontFamily: "ui-monospace, 'SF Mono', Menlo, monospace", flexShrink: 0, whiteSpace: "nowrap" as const }}>
               {ASSET_TYPE_LABELS[t]}
@@ -1761,7 +2006,7 @@ function AssetsView({ assets, companies, jobs, onUpdate, onDelete }: {
       <div style={{ display: "grid", gridTemplateColumns: isMobile ? "repeat(2, 1fr)" : "repeat(3, 1fr)", gap: 8 }}>
         {filtered.map(a => {
           const AIcon = ASSET_ICONS[a.type];
-          const isPerson = a.type === "Person";
+          const isPerson = a.type === "Contact";
           const isGmail = a.type === "Gmail link";
           const rawLabel = isPerson ? (a.personName || a.label) : a.label;
           const displayLabel = isGmail ? (rawLabel.startsWith("http") || rawLabel === "Gmail" ? "Gmail thread" : rawLabel) : rawLabel;
@@ -1796,15 +2041,108 @@ function AssetsView({ assets, companies, jobs, onUpdate, onDelete }: {
           onClose={() => setEditingAsset(null)}
           onSave={updated => { onUpdate(updated); setEditingAsset(null); }}
           onDelete={id => { onDelete(id); setEditingAsset(null); }}
+          onNavigateCompany={onNavigateCompany}
+          onNavigateJob={onNavigateJob}
         />
       )}
     </div>
   );
 }
 
+// ── Mock mode ─────────────────────────────────────────────────────────────
+
+const MOCK_MODE = false;
+
+const MOCK_COMPANIES: Company[] = [
+  { id: "c1", name: "Figma", notes: "", logoUrl: "", links: [], url: "" },
+  { id: "c2", name: "Stripe", notes: "", logoUrl: "", links: [], url: "" },
+  { id: "c3", name: "Apple", notes: "", logoUrl: "", links: [], url: "" },
+];
+
+const MOCK_JOBS: Job[] = [
+  { id: "j1", name: "Staff Product Designer", companyId: "c1", companyName: "Figma", companyLogoUrl: "", status: "In progress", archived: false, notes: "Referred by Jordan K.", location: "San Francisco, CA", createdAt: "2026-05-10T00:00:00Z", url: "" },
+  { id: "j2", name: "Senior UX Designer, Payments", companyId: "c2", companyName: "Stripe", companyLogoUrl: "", status: "Applied (no response)", archived: false, notes: "", location: "Remote", createdAt: "2026-05-20T00:00:00Z", url: "" },
+  { id: "j3", name: "Principal Designer, HI", companyId: "c3", companyName: "Apple", companyLogoUrl: "", status: "Want to apply", archived: false, notes: "", location: "Cupertino, CA", createdAt: "2026-06-01T00:00:00Z", url: "" },
+  { id: "j4", name: "Design Lead, Growth", companyId: "c1", companyName: "Figma", companyLogoUrl: "", status: "Closed", archived: false, notes: "Position filled.", location: "San Francisco, CA", createdAt: "2026-04-15T00:00:00Z", url: "" },
+];
+
+const MOCK_ACTIVITIES: Activity[] = [
+  { id: "ac1", type: "Job created", date: "2026-05-10", notes: "", jobId: "j1", jobName: "Staff Product Designer", url: "" },
+  { id: "ac2", type: "Job created", date: "2026-05-20", notes: "", jobId: "j2", jobName: "Senior UX Designer, Payments", url: "" },
+  { id: "ac3", type: "Job created", date: "2026-06-01", notes: "", jobId: "j3", jobName: "Principal Designer, HI", url: "" },
+  { id: "ac4", type: "Job created", date: "2026-04-15", notes: "", jobId: "j4", jobName: "Design Lead, Growth", url: "" },
+  { id: "a1", type: "Interview", date: "2026-06-05", notes: "First round with hiring manager.", jobId: "j1", jobName: "Staff Product Designer", url: "" },
+  { id: "a2", type: "Application submitted", date: "2026-05-21", notes: "", jobId: "j2", jobName: "Senior UX Designer, Payments", url: "" },
+  { id: "a3", type: "Note", date: "2026-06-10", notes: "Need to follow up on portfolio review.", jobId: "j1", jobName: "Staff Product Designer", url: "" },
+];
+
+const MOCK_ASSETS: Asset[] = [
+  { id: "ast1", type: "URL", label: "Figma — Staff Designer JD", assetUrl: "https://figma.com/careers", personName: "", personTitle: "", personEmail: "", personPhone: "", personLinkedin: "", personNotes: "", companyId: "c1", jobId: "j1", activityId: "", url: "" },
+  { id: "ast2", type: "Gmail link", label: "Thread: Jordan Kessler · Figma", assetUrl: "https://mail.google.com/mail/u/0/#inbox/mock", personName: "", personTitle: "", personEmail: "", personPhone: "", personLinkedin: "", personNotes: "", companyId: "c1", jobId: "j1", activityId: "", url: "" },
+  { id: "ast3", type: "Contact", label: "Jordan Kessler", assetUrl: "", personName: "Jordan Kessler", personTitle: "Recruiter", personEmail: "jordan@figma.com", personPhone: "", personLinkedin: "", personNotes: "Main point of contact.", companyId: "c1", jobId: "j1", activityId: "", url: "" },
+  { id: "ast4", type: "URL", label: "Stripe — Senior UX JD", assetUrl: "https://stripe.com/jobs", personName: "", personTitle: "", personEmail: "", personPhone: "", personLinkedin: "", personNotes: "", companyId: "c2", jobId: "j2", activityId: "", url: "" },
+  { id: "ast5", type: "Google Drive link", label: "Portfolio — Case Studies", assetUrl: "https://drive.google.com/file/d/mock123/view", personName: "", personTitle: "", personEmail: "", personPhone: "", personLinkedin: "", personNotes: "", companyId: "c1", jobId: "j1", activityId: "", url: "" },
+];
+
 // ── Main App ───────────────────────────────────────────────────────────────
 
 type View = "jobs" | "companies" | "assets";
+
+const NAV_VIEWS: View[] = ["jobs", "companies", "assets"];
+
+function NavTabs({ view, navTo }: { view: View; navTo: (v: View) => void }) {
+  const tabRefs = useRef<(HTMLButtonElement | null)[]>([]);
+  const [pill, setPill] = useState({ left: 0, width: 0 });
+  const [ready, setReady] = useState(false);
+
+  const measure = useCallback(() => {
+    const idx = NAV_VIEWS.indexOf(view);
+    const el = tabRefs.current[idx];
+    if (!el) return;
+    const parent = el.parentElement!;
+    const parentRect = parent.getBoundingClientRect();
+    const rect = el.getBoundingClientRect();
+    setPill({ left: rect.left - parentRect.left, width: rect.width });
+    setReady(true);
+  }, [view]);
+
+  useEffect(() => { measure(); }, [measure]);
+  useEffect(() => {
+    window.addEventListener("resize", measure);
+    return () => window.removeEventListener("resize", measure);
+  }, [measure]);
+
+  return (
+    <div style={{ position: "relative", display: "flex", gap: 2, flex: 1 }}>
+      {/* sliding pill */}
+      <div style={{
+        position: "absolute", top: 0, bottom: 0, borderRadius: 8,
+        background: "rgba(28,56,48,0.09)",
+        left: pill.left, width: pill.width,
+        transition: ready ? "left 200ms ease-out, width 200ms ease-out" : "none",
+        pointerEvents: "none",
+      }} />
+      {NAV_VIEWS.map((v, i) => (
+        <button
+          key={v}
+          ref={el => { tabRefs.current[i] = el; }}
+          onClick={() => navTo(v)}
+          style={{
+            position: "relative", zIndex: 1,
+            padding: "6px 14px", borderRadius: 8, border: "none", cursor: "pointer",
+            background: "transparent",
+            color: view === v ? "#1C3830" : "#7A776F",
+            fontSize: 14, fontWeight: 500,
+            transition: "color 200ms ease-out",
+            textTransform: "capitalize",
+          }}
+        >
+          {v}
+        </button>
+      ))}
+    </div>
+  );
+}
 
 export default function App() {
   const isMobile = useIsMobile();
@@ -1833,6 +2171,14 @@ export default function App() {
 
   const load = useCallback(async () => {
     setLoading(true);
+    if (MOCK_MODE) {
+      setCompanies(MOCK_COMPANIES);
+      setJobs(MOCK_JOBS);
+      setActivities(MOCK_ACTIVITIES);
+      setAssets(MOCK_ASSETS);
+      setLoading(false);
+      return;
+    }
     try {
       const [c, j, a, ast] = await Promise.all([
         fetch("/api/companies").then(r => r.json()),
@@ -1903,15 +2249,11 @@ export default function App() {
       {!isMobile && (
         <nav style={{ background: C.bg, borderBottom: `1px solid ${C.border}`, position: "sticky", top: 0, zIndex: 800, padding: "0 32px" }}>
           <div style={{ maxWidth: 760, margin: "0 auto", display: "flex", alignItems: "center", height: 56 }}>
-            <div style={{ fontFamily: "var(--font-dm-serif), Georgia, serif", fontSize: 21, fontWeight: 400, color: C.text, marginRight: 28, letterSpacing: -0.5 }}>Job Tracker</div>
-            <div style={{ display: "flex", gap: 2, flex: 1 }}>
-              {(["jobs", "companies", "assets"] as View[]).map(v => (
-                <button key={v} onClick={() => navTo(v)}
-                  style={{ padding: "6px 14px", borderRadius: 8, border: "none", cursor: "pointer", background: view === v ? "rgba(28,56,48,0.09)" : "transparent", color: view === v ? "#1C3830" : "#7A776F", fontSize: 14, fontWeight: 500, transition: "background .15s, color .15s", textTransform: "capitalize" as const }}>
-                  {v}
-                </button>
-              ))}
+            <div style={{ display: "flex", alignItems: "center", gap: 6, marginRight: 28 }}>
+              <svg width="28" height="28" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg"><circle cx="256" cy="256" r="256" fill="#1C3830"/><g transform="translate(256 256)"><g transform="translate(-120 -120) scale(10)" stroke="white" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round"><rect width="20" height="14" x="2" y="7" rx="2" ry="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></g></g></svg>
+              <span style={{ fontFamily: "var(--font-dm-serif), Georgia, serif", fontSize: 21, fontWeight: 400, color: C.text, letterSpacing: -0.5 }}>Job Tracker</span>
             </div>
+            <NavTabs view={view} navTo={navTo} />
             <Btn onClick={newBtnAction} style={{ padding: "7px 16px", fontSize: 13 }}>
               <Plus size={14} /> {newBtnLabel}
             </Btn>
@@ -1922,7 +2264,10 @@ export default function App() {
       {/* Mobile top bar — shown on mobile only */}
       {isMobile && (
         <div style={{ background: C.bg, borderBottom: `1px solid ${C.border}`, position: "sticky", top: 0, zIndex: 800, padding: "0 16px", display: "flex", alignItems: "center", justifyContent: "space-between", height: 52 }}>
-          <div style={{ fontFamily: "var(--font-dm-serif), Georgia, serif", fontSize: 19, fontWeight: 400, color: C.text, letterSpacing: -0.5 }}>Job Tracker</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <svg width="28" height="28" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg"><circle cx="256" cy="256" r="256" fill="#1C3830"/><g transform="translate(256 256)"><g transform="translate(-120 -120) scale(10)" stroke="white" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round"><rect width="20" height="14" x="2" y="7" rx="2" ry="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></g></g></svg>
+            <span style={{ fontFamily: "var(--font-dm-serif), Georgia, serif", fontSize: 22, fontWeight: 400, color: C.text, letterSpacing: -0.5 }}>Job Tracker</span>
+          </div>
           <button onClick={newBtnAction} style={{ background: C.green, color: "#fff", border: "none", borderRadius: 8, padding: "7px 12px", fontSize: 13, fontWeight: 500, cursor: "pointer", display: "flex", alignItems: "center", gap: 5 }}>
             <Plus size={14} /> {newBtnLabel}
           </button>
@@ -1952,11 +2297,13 @@ export default function App() {
             )}
             {view === "jobs" && selectedJob && (
               <JobDetailPage
-                job={selectedJob} companies={companies} jobs={jobs}
+                job={selectedJob} companies={companies} jobs={jobs} activities={activities} assets={assets}
                 onBack={() => setSelectedJob(null)}
                 onStatusChange={updateJobStatus}
                 onDelete={id => { setJobs(js => js.filter(j => j.id !== id)); }}
                 onJobUpdate={updated => { setJobs(js => js.map(j => j.id === updated.id ? updated : j)); setSelectedJob(updated); }}
+                onNavigateCompany={c => { setView("companies"); setSelectedCompany(c); setSelectedJob(null); }}
+                onNavigateJob={j => { setSelectedJob(j); }}
               />
             )}
             {view === "companies" && !selectedCompany && (
@@ -1976,6 +2323,8 @@ export default function App() {
                 assets={assets} companies={companies} jobs={jobs}
                 onUpdate={updated => setAssets(asts => asts.map(a => a.id === updated.id ? updated : a))}
                 onDelete={id => setAssets(asts => asts.filter(a => a.id !== id))}
+                onNavigateCompany={c => { setView("companies"); setSelectedCompany(c); }}
+                onNavigateJob={j => { setView("jobs"); setSelectedJob(j); }}
               />
             )}
           </>
@@ -1992,10 +2341,11 @@ export default function App() {
         <AddJobModal
           companies={companies}
           onClose={() => setShowAddJob(false)}
-          onSave={(j, newCompany, newAsset) => {
+          onSave={(j, newCompany, newAsset, createdActivity) => {
             setJobs(js => [j, ...js]);
             if (newCompany) setCompanies(cs => [...cs, newCompany].sort((a, b) => a.name.localeCompare(b.name)));
             if (newAsset) setAssets(asts => [newAsset, ...asts]);
+            if (createdActivity) setActivities(acts => [createdActivity, ...acts]);
             setShowAddJob(false);
           }}
         />
