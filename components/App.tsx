@@ -75,21 +75,21 @@ const ACTIVITY_COLORS: Record<ActivityType, string> = {
 const ASSET_ICONS: Record<AssetType, any> = {
   "URL": Link,
   "Gmail link": Mail,
-  "Google Drive link": FileText,
+  "Document": FileText,
   "Contact": User,
 };
 
 const ASSET_COLORS: Record<AssetType, string> = {
   "URL": "#6B7280",
   "Gmail link": "#16A34A",
-  "Google Drive link": "#EA580C",
+  "Document": "#EA580C",
   "Contact": "#6B7280",
 };
 
 const ASSET_BG: Record<AssetType, string> = {
   "URL": "#F3F4F6",
   "Gmail link": "#DCFCE7",
-  "Google Drive link": "#FFEDD5",
+  "Document": "#FFEDD5",
   "Contact": "#F3F4F6",
 };
 
@@ -373,9 +373,9 @@ function Btn({ onClick, variant = "primary", children, disabled, style }: any) {
   return <button style={variants[variant] || variants.primary} onClick={onClick} disabled={disabled}>{children}</button>;
 }
 
-function Modal({ title, onClose, onBack, children, width = 560 }: {
+function Modal({ title, onClose, onBack, children, width = 560, isDirty = false }: {
   title: string; onClose: () => void; onBack?: () => void;
-  children: React.ReactNode; width?: number;
+  children: React.ReactNode; width?: number; isDirty?: boolean;
 }) {
   const isMobile = useIsMobile();
   const [entered, setEntered] = useState(false);
@@ -385,10 +385,10 @@ function Modal({ title, onClose, onBack, children, width = 560 }: {
   }, []);
 
   useEffect(() => {
-    const handler = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    const handler = (e: KeyboardEvent) => { if (e.key === "Escape" && !isDirty) onClose(); };
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
-  }, [onClose]);
+  }, [onClose, isDirty]);
 
   if (isMobile) {
     return (
@@ -500,8 +500,9 @@ function AddCompanyModal({ onClose, onSave }: { onClose: () => void; onSave: (c:
     if (!data.error) { onSave(data); onClose(); }
   };
 
+  const isDirty = form.name !== "" || form.notes !== "";
   return (
-    <Modal title="New company" onClose={onClose}>
+    <Modal title="New company" onClose={onClose} isDirty={isDirty}>
       <Field label="Company name *">
         <input style={inputStyle} value={form.name} onChange={u("name")} placeholder="e.g. Airbnb" autoFocus />
       </Field>
@@ -646,7 +647,7 @@ function AddJobModal({ companies, onClose, onSave }: {
   );
 
   if (step === "pick") return (
-    <Modal title="Add a job" onClose={onClose}>
+    <Modal title="Add a job" onClose={onClose} isDirty={false}>
       {extractError && (
         <div style={{ background: "#FEF2F2", border: "1px solid #FECACA", borderRadius: 8, padding: "10px 14px", marginBottom: 16, fontSize: 13, color: C.red }}>
           {extractError}
@@ -661,7 +662,7 @@ function AddJobModal({ companies, onClose, onSave }: {
   );
 
   if (step === "url") return (
-    <Modal title="Add a job" onClose={onClose} onBack={() => setStep("pick")}>
+    <Modal title="Add a job" onClose={onClose} onBack={() => setStep("pick")} isDirty={urlInput !== ""}>
       <Field label="Job posting URL">
         <input style={inputStyle} value={urlInput} autoFocus onChange={e => setUrlInput(e.target.value)}
           placeholder="https://linkedin.com/jobs/… or company careers page"
@@ -675,7 +676,7 @@ function AddJobModal({ companies, onClose, onSave }: {
   );
 
   if (step === "paste") return (
-    <Modal title="Add a job" onClose={onClose} onBack={() => setStep("pick")}>
+    <Modal title="Add a job" onClose={onClose} onBack={() => setStep("pick")} isDirty={pasteInput.trim() !== ""}>
       <Field label="Job description">
         <textarea style={{ ...textareaStyle, minHeight: 180 }} value={pasteInput} autoFocus onChange={e => setPasteInput(e.target.value)} placeholder="Paste the full job description here…" />
       </Field>
@@ -688,7 +689,7 @@ function AddJobModal({ companies, onClose, onSave }: {
   // step === "review"
   const matchedCompany = companies.find(c => c.id === form.companyId);
   return (
-    <Modal title="Review job details" onClose={onClose} onBack={() => setStep("pick")}>
+    <Modal title="Review job details" onClose={onClose} onBack={() => setStep("pick")} isDirty={form.name !== "" || form.companyName !== ""}>
       <Field label="Job title *">
         <input style={inputStyle} value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="e.g. Staff UX Designer" autoFocus />
       </Field>
@@ -771,8 +772,9 @@ function EditActivityModal({ activity, onClose, onSave, onDelete, assets = [] }:
     onClose();
   };
 
+  const isDirty = form.type !== activity.type || form.date !== activity.date || form.notes !== activity.notes;
   return (
-    <Modal title="Edit activity" onClose={onClose}>
+    <Modal title="Edit activity" onClose={onClose} isDirty={isDirty}>
       <div style={{ marginBottom: 18 }}>
         <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: C.muted, textTransform: "uppercase" as const, letterSpacing: 0.8, marginBottom: 8 }}>Type</label>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
@@ -832,8 +834,9 @@ function AddActivityModal({ jobId, jobName, onClose, onSave, assets = [] }: {
     if (!data.error) { onSave({ ...data, jobName }); onClose(); }
   };
 
+  const isDirty = form.notes !== "" || form.type !== "Note" || form.date !== today();
   return (
-    <Modal title="Add activity" onClose={onClose}>
+    <Modal title="Add activity" onClose={onClose} isDirty={isDirty}>
       <div style={{ fontSize: 13, color: C.muted, marginBottom: 18 }}>For: <strong style={{ color: C.text }}>{jobName}</strong></div>
 
       <div style={{ marginBottom: 18 }}>
@@ -960,12 +963,12 @@ function AddAssetModal({ companies, jobs, linkTo, onClose, onSave }: {
   const ASSET_OPTIONS: { type: AssetType; label: string; sub: string }[] = [
     { type: "URL", label: "URL", sub: "A link to a job posting or resource" },
     { type: "Gmail link", label: "Gmail", sub: "An email thread or conversation" },
-    { type: "Google Drive link", label: "Google Drive", sub: "A document, resume, or file" },
+    { type: "Document", label: "Document", sub: "A document, resume, or file" },
     { type: "Contact", label: "Contact", sub: "A contact: recruiter, HM, referral" },
   ];
 
   if (step === "pick") return (
-    <Modal title="New asset" onClose={onClose}>
+    <Modal title="New asset" onClose={onClose} isDirty={false}>
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         {ASSET_OPTIONS.map(({ type, label, sub }) => {
           const Icon = ASSET_ICONS[type];
@@ -991,8 +994,9 @@ function AddAssetModal({ companies, jobs, linkTo, onClose, onSave }: {
   );
 
   const TypeIcon = ASSET_ICONS[assetType];
+  const assetFormDirty = form.label !== "" || form.assetUrl !== "" || form.personName !== "" || form.personEmail !== "" || form.personPhone !== "" || form.personLinkedin !== "" || form.personNotes !== "";
   return (
-    <Modal title="New asset" onClose={onClose} onBack={() => setStep("pick")}>
+    <Modal title="New asset" onClose={onClose} onBack={() => setStep("pick")} isDirty={assetFormDirty}>
       <div style={{ display: "inline-flex", alignItems: "center", gap: 6, background: ASSET_BG[assetType], color: ASSET_COLORS[assetType], padding: "4px 10px", borderRadius: 20, fontSize: 11, fontWeight: 600, marginBottom: 20 }}>
         <TypeIcon size={12} /> {assetType}
       </div>
@@ -1071,11 +1075,23 @@ function EditAssetModal({ asset, companies, jobs, onClose, onSave, onDelete, onN
   const u = (k: string) => (e: any) => setForm((f: any) => ({ ...f, [k]: e.target.value }));
   const isPerson = asset.type === "Contact";
   const isMobile = useIsMobile();
+  const editIsDirty = editing && (
+    form.label !== asset.label ||
+    form.assetUrl !== asset.assetUrl ||
+    form.personName !== asset.personName ||
+    form.personTitle !== asset.personTitle ||
+    form.personEmail !== asset.personEmail ||
+    form.personPhone !== asset.personPhone ||
+    form.personLinkedin !== asset.personLinkedin ||
+    form.personNotes !== asset.personNotes ||
+    form.companyId !== asset.companyId ||
+    form.jobId !== asset.jobId
+  );
   useEffect(() => {
-    const handler = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    const handler = (e: KeyboardEvent) => { if (e.key === "Escape" && !editIsDirty) onClose(); };
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
-  }, [onClose]);
+  }, [onClose, editIsDirty]);
   const linkedCompany = companies.find(c => c.id === asset.companyId);
   const linkedJob = jobs.find(j => j.id === asset.jobId);
   const displayLabel = isPerson ? (asset.personName || asset.label) : asset.label;
@@ -1175,7 +1191,7 @@ function EditAssetModal({ asset, companies, jobs, onClose, onSave, onDelete, onN
           )}
 
           {(linkedCompany || linkedJob) && (
-            <div style={{ marginBottom: 20 }}>
+            <div style={{ marginBottom: 20, marginTop: !isPerson && !editing && asset.assetUrl ? 24 : undefined }}>
               <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: C.muted, textTransform: "uppercase", letterSpacing: 0.8, marginBottom: 8 }}>Attached to</label>
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                 {linkedCompany && (
@@ -1229,10 +1245,6 @@ function EditAssetModal({ asset, companies, jobs, onClose, onSave, onDelete, onN
                   {saving ? <Loader2 size={13} className="animate-spin" /> : null} Save
                 </Btn>
                 <Btn variant="ghost" onClick={() => setEditing(false)} style={{ padding: "8px 16px", fontSize: 13 }}>Cancel</Btn>
-              </>
-            ) : (
-              <>
-                <Btn variant="ghost" onClick={() => setEditing(true)} style={{ padding: "8px 16px", fontSize: 13 }}>Edit</Btn>
                 <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
                   {confirmDelete ? (
                     <>
@@ -1245,6 +1257,13 @@ function EditAssetModal({ asset, companies, jobs, onClose, onSave, onDelete, onN
                   ) : (
                     <Btn variant="danger" onClick={() => setConfirmDelete(true)} style={{ padding: "8px 16px", fontSize: 13 }}>Delete</Btn>
                   )}
+                </div>
+              </>
+            ) : (
+              <>
+                <Btn variant="ghost" onClick={() => setEditing(true)} style={{ padding: "8px 16px", fontSize: 13 }}>Edit</Btn>
+                <div style={{ marginLeft: "auto" }}>
+                  <Btn variant="ghost" onClick={onClose} style={{ padding: "8px 16px", fontSize: 13 }}>Close</Btn>
                 </div>
               </>
             )}
@@ -1286,6 +1305,7 @@ function JobDetailPage({ job, companies, jobs, activities, assets, onBack, onSta
   const [notesHovered, setNotesHovered] = useState(false);
   const [editingActivity, setEditingActivity] = useState<Activity | null>(null);
   const [hoveredActivityId, setHoveredActivityId] = useState<string | null>(null);
+  const [pendingStatus, setPendingStatus] = useState<JobStatus | null>(null);
   const statusRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -1396,7 +1416,14 @@ function JobDetailPage({ job, companies, jobs, activities, assets, onBack, onSta
           {statusDropdown && (
             <div style={{ position: "absolute", right: 0, top: "calc(100% + 6px)", background: "#fff", borderRadius: 10, border: `1px solid ${C.border}`, boxShadow: "0 4px 16px rgba(0,0,0,0.1)", zIndex: 200, minWidth: 210, padding: 6 }}>
               {JOB_STATUSES.map(s => (
-                <button key={s} onClick={() => { onStatusChange(job.id, s); setStatusDropdown(false); }}
+                <button key={s} onClick={() => {
+                  setStatusDropdown(false);
+                  if (job.archived && s !== "Closed") {
+                    setPendingStatus(s);
+                  } else {
+                    onStatusChange(job.id, s);
+                  }
+                }}
                   style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%", padding: "8px 12px", background: "none", border: "none", cursor: "pointer", borderRadius: 6, fontSize: 13, color: C.text }}>
                   {s}
                   {job.status === s && <Check size={13} color={C.green} />}
@@ -1406,6 +1433,23 @@ function JobDetailPage({ job, companies, jobs, activities, assets, onBack, onSta
           )}
         </div>
       </div>
+
+      {/* Unarchive confirmation */}
+      {pendingStatus && (
+        <div style={{ background: "#FFFBEB", border: "1px solid #FDE68A", borderRadius: 10, padding: "14px 18px", marginBottom: 28, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+          <span style={{ fontSize: 14, color: "#92400E", fontWeight: 500 }}>Do you want to unarchive this job?</span>
+          <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
+            <Btn variant="ghost" onClick={() => setPendingStatus(null)} style={{ padding: "6px 14px", fontSize: 13 }}>Cancel</Btn>
+            <Btn onClick={async () => {
+              const s = pendingStatus;
+              setPendingStatus(null);
+              await fetch(`/api/jobs/${job.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ archived: false, status: s }) });
+              onJobUpdate({ ...job, archived: false, status: s });
+              onStatusChange(job.id, s);
+            }} style={{ padding: "6px 14px", fontSize: 13 }}>Unarchive + apply</Btn>
+          </div>
+        </div>
+      )}
 
       {/* Delete confirmation */}
       {showConfirmDelete && (
@@ -1421,37 +1465,40 @@ function JobDetailPage({ job, companies, jobs, activities, assets, onBack, onSta
       )}
 
       {/* Notes */}
-      <div style={{ marginBottom: 36 }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
-          <SectionLabel>Notes</SectionLabel>
-          {!editNotes && (
-            <button onClick={() => { setEditNotes(true); setNotesForm(job.notes); }}
-              style={{ background: "none", border: "none", cursor: "pointer", color: C.muted, padding: 2, display: "flex" }}>
-              <Pencil size={13} />
-            </button>
+      {(job.notes || editNotes) && (
+        <div style={{ marginBottom: 36 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+            <SectionLabel>Notes</SectionLabel>
+            {!editNotes && (
+              <button onClick={() => { setEditNotes(true); setNotesForm(job.notes); }}
+                style={{ background: "none", border: "none", cursor: "pointer", color: C.muted, padding: 2, display: "flex" }}>
+                <Pencil size={13} />
+              </button>
+            )}
+          </div>
+          {editNotes ? (
+            <div>
+              <textarea style={{ ...textareaStyle, minHeight: 100 }} value={notesForm} onChange={e => setNotesForm(e.target.value)} autoFocus />
+              <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                <Btn onClick={saveNotes} style={{ padding: "7px 14px", fontSize: 13 }}>Save</Btn>
+                <Btn variant="ghost" onClick={() => setEditNotes(false)} style={{ padding: "7px 14px", fontSize: 13 }}>Cancel</Btn>
+              </div>
+            </div>
+          ) : (
+            <div
+              onMouseEnter={() => setNotesHovered(true)}
+              onMouseLeave={() => setNotesHovered(false)}
+              onClick={() => setEditNotes(true)}
+              style={{ fontSize: 14, color: C.text, lineHeight: 1.7, cursor: "text" }}>
+              {job.notes}
+            </div>
           )}
         </div>
-        {editNotes ? (
-          <div>
-            <textarea style={{ ...textareaStyle, minHeight: 100 }} value={notesForm} onChange={e => setNotesForm(e.target.value)} autoFocus />
-            <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-              <Btn onClick={saveNotes} style={{ padding: "7px 14px", fontSize: 13 }}>Save</Btn>
-              <Btn variant="ghost" onClick={() => setEditNotes(false)} style={{ padding: "7px 14px", fontSize: 13 }}>Cancel</Btn>
-            </div>
-          </div>
-        ) : (
-          <div
-            onMouseEnter={() => setNotesHovered(true)}
-            onMouseLeave={() => setNotesHovered(false)}
-            onClick={() => setEditNotes(true)}
-            style={{ fontSize: 14, color: job.notes ? C.text : C.muted, lineHeight: 1.7, cursor: "text" }}>
-            {job.notes || "Click to add notes…"}
-          </div>
-        )}
-      </div>
+      )}
 
       {/* Assets */}
       <div style={{ marginBottom: 36 }}>
+        <div style={{ borderTop: `1px solid ${C.border}`, marginBottom: 20 }} />
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
           <SectionLabel>Assets</SectionLabel>
           <button onClick={() => setShowAddAsset(true)}
@@ -1481,6 +1528,7 @@ function JobDetailPage({ job, companies, jobs, activities, assets, onBack, onSta
 
       {/* Activity */}
       <div style={{ marginBottom: 48 }}>
+        <div style={{ borderTop: `1px solid ${C.border}`, marginBottom: 20 }} />
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
           <SectionLabel>Activity</SectionLabel>
           <button onClick={() => setShowAddActivity(true)}
@@ -1514,12 +1562,10 @@ function JobDetailPage({ job, companies, jobs, activities, assets, onBack, onSta
                     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
                       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                         <span style={{ fontSize: 14, fontWeight: 400, color: C.text }}>{a.type}</span>
-                        {a.type !== "Job created" && (
-                          <button onClick={() => setEditingActivity(a)}
-                            style={{ background: "none", border: "none", cursor: "pointer", padding: 2, color: C.muted, display: "flex", opacity: hoveredActivityId === a.id ? 1 : 0, transition: "opacity .15s" }}>
-                            <Pencil size={13} />
-                          </button>
-                        )}
+                        <button onClick={() => setEditingActivity(a)}
+                          style={{ background: "none", border: "none", cursor: "pointer", padding: 2, color: C.muted, display: "flex", opacity: hoveredActivityId === a.id ? 1 : 0, transition: "opacity .15s" }}>
+                          <Pencil size={13} />
+                        </button>
                       </div>
                       <span style={{ fontSize: 12, color: C.muted }}>{formatDate(a.date)}</span>
                     </div>
@@ -1538,10 +1584,17 @@ function JobDetailPage({ job, companies, jobs, activities, assets, onBack, onSta
 
       {/* Archive + Delete */}
       <div style={{ borderTop: `1px solid ${C.border}`, paddingTop: 20, display: "flex", alignItems: "center", gap: 20 }}>
-        <button onClick={async () => { await fetch(`/api/jobs/${job.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ archived: true }) }); onJobUpdate({ ...job, archived: true }); onBack(); }}
-          style={{ background: "none", border: "none", cursor: "pointer", color: C.muted, fontSize: 13, display: "flex", alignItems: "center", gap: 6 }}>
-          <Archive size={13} /> Archive job
-        </button>
+        {job.archived ? (
+          <button onClick={async () => { await fetch(`/api/jobs/${job.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ archived: false }) }); onJobUpdate({ ...job, archived: false }); }}
+            style={{ background: "none", border: "none", cursor: "pointer", color: C.muted, fontSize: 13, display: "flex", alignItems: "center", gap: 6 }}>
+            <Archive size={13} /> Unarchive job
+          </button>
+        ) : (
+          <button onClick={async () => { await fetch(`/api/jobs/${job.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ archived: true }) }); onJobUpdate({ ...job, archived: true }); onBack(); }}
+            style={{ background: "none", border: "none", cursor: "pointer", color: C.muted, fontSize: 13, display: "flex", alignItems: "center", gap: 6 }}>
+            <Archive size={13} /> Archive job
+          </button>
+        )}
         <button onClick={() => setShowConfirmDelete(true)}
           style={{ background: "none", border: "none", cursor: "pointer", color: C.muted, fontSize: 13, display: "flex", alignItems: "center", gap: 6 }}>
           <Trash2 size={13} /> Delete job
@@ -1899,7 +1952,18 @@ function CompaniesView({ companies, jobs, onSelect }: {
   onSelect: (c: Company) => void;
 }) {
   const [search, setSearch] = useState("");
-  const filtered = companies.filter(c => c.name.toLowerCase().includes(search.toLowerCase()));
+  const isMobile = useIsMobile();
+
+  const withCount = companies
+    .map(c => ({ c, openCount: jobs.filter(j => j.companyId === c.id && !j.archived && j.status !== "Closed").length }))
+    .filter(({ c }) => c.name.toLowerCase().includes(search.toLowerCase()));
+
+  const sorted = [...withCount].sort((a, b) => {
+    if (a.openCount === 0 && b.openCount > 0) return 1;
+    if (b.openCount === 0 && a.openCount > 0) return -1;
+    if (b.openCount !== a.openCount) return b.openCount - a.openCount;
+    return a.c.name.localeCompare(b.c.name);
+  });
 
   return (
     <div style={{ maxWidth: 760, margin: "0 auto" }}>
@@ -1908,19 +1972,18 @@ function CompaniesView({ companies, jobs, onSelect }: {
         <input style={{ ...inputStyle, paddingLeft: 34 }} placeholder="Search companies…" value={search} onChange={e => setSearch(e.target.value)} />
       </div>
 
-      {filtered.length === 0 && (
+      {sorted.length === 0 && (
         <div style={{ background: "#fff", borderRadius: 12, padding: 48, textAlign: "center", color: C.muted, fontSize: 14 }}>
           {companies.length === 0 ? "No companies yet. Add your first one." : "No matches."}
         </div>
       )}
 
-      <div style={{ display: "grid", gap: 8 }}>
-        {filtered.map(c => {
-          const openCount = jobs.filter(j => j.companyId === c.id && !j.archived && j.status !== "Closed").length;
+      <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 8 }}>
+        {sorted.map(({ c, openCount }) => {
           const openLabel = openCount === 0 ? "No open jobs" : openCount === 1 ? "1 open job" : `${openCount} open jobs`;
           return (
             <div key={c.id} onClick={() => onSelect(c)}
-              style={{ background: "#fff", borderRadius: 12, padding: "22px 20px", cursor: "pointer", border: `1px solid ${C.border}`, transition: "box-shadow .15s", display: "flex", alignItems: "center", gap: 14 }}
+              style={{ background: "#fff", borderRadius: 12, padding: "18px 20px", cursor: "pointer", border: `1px solid ${C.border}`, transition: "box-shadow .15s", display: "flex", alignItems: "center", gap: 14 }}
               onMouseEnter={e => (e.currentTarget as HTMLDivElement).style.boxShadow = "0 2px 14px rgba(0,0,0,0.07)"}
               onMouseLeave={e => (e.currentTarget as HTMLDivElement).style.boxShadow = "none"}>
               <CompanyLogo name={c.name} logoUrl={c.logoUrl || undefined} size={40} radius={10} />
@@ -1928,7 +1991,6 @@ function CompaniesView({ companies, jobs, onSelect }: {
                 <div style={{ fontSize: 15, fontWeight: 600, color: C.text, marginBottom: 2 }}>{c.name}</div>
                 <div style={{ fontSize: 13, color: C.muted }}>{openLabel}</div>
               </div>
-              <ChevronRight size={16} color={C.muted} style={{ flexShrink: 0 }} />
             </div>
           );
         })}
@@ -1943,7 +2005,7 @@ const ASSET_TYPE_LABELS: Record<string, string> = {
   "All": "All",
   "URL": "URL",
   "Gmail link": "Gmail",
-  "Google Drive link": "Google Drive",
+  "Document": "Document",
   "Contact": "Contact",
 };
 
@@ -1980,7 +2042,7 @@ function AssetsView({ assets, companies, jobs, onUpdate, onDelete, onNavigateCom
     <div style={{ maxWidth: isMobile ? "100%" : 760, margin: "0 auto" }}>
       <div style={{ display: "flex", flexDirection: isMobile ? "column" : "row", alignItems: isMobile ? "stretch" : "center", justifyContent: "space-between", gap: 10, marginBottom: 20 }}>
         <div style={{ display: "flex", gap: 8, overflowX: isMobile ? "auto" : "visible", flexWrap: isMobile ? "nowrap" : "wrap", paddingBottom: isMobile ? 2 : 0 }}>
-          {(["All", "URL", "Gmail link", "Google Drive link", "Contact"] as const).map(t => (
+          {(["All", "URL", "Gmail link", "Document", "Contact"] as const).map(t => (
             <button key={t} onClick={() => setTypeFilter(t as any)}
               style={{ borderRadius: 20, padding: "7px 16px", fontSize: 12, fontWeight: 500, cursor: "pointer", border: "1.5px solid rgba(23,23,26,0.18)", background: typeFilter === t ? "#1C3830" : "transparent", color: typeFilter === t ? "#fff" : "#7A776F", transition: "all .1s", fontFamily: "ui-monospace, 'SF Mono', Menlo, monospace", flexShrink: 0, whiteSpace: "nowrap" as const }}>
               {ASSET_TYPE_LABELS[t]}
@@ -2014,7 +2076,7 @@ function AssetsView({ assets, companies, jobs, onUpdate, onDelete, onNavigateCom
           const linkedCompany = companies.find(c => c.id === a.companyId) || (linkedJob ? companies.find(c => c.id === linkedJob.companyId) : undefined);
           return (
             <div key={a.id} onClick={() => setEditingAsset(a)}
-              style={{ background: "#fff", borderRadius: 10, padding: "14px 16px 12px", border: `1px solid ${C.border}`, cursor: "pointer", transition: "box-shadow .15s", display: "flex", flexDirection: "column", gap: 10, overflow: "hidden", minWidth: 0 }}
+              style={{ background: "#fff", borderRadius: 10, padding: "14px 16px 14px", border: `1px solid ${C.border}`, cursor: "pointer", transition: "box-shadow .15s", display: "flex", flexDirection: "column", gap: 12, overflow: "hidden", minWidth: 0 }}
               onMouseEnter={e => (e.currentTarget as HTMLDivElement).style.boxShadow = "0 2px 14px rgba(0,0,0,0.07)"}
               onMouseLeave={e => (e.currentTarget as HTMLDivElement).style.boxShadow = "none"}>
               <div style={{ display: "inline-flex", alignItems: "center", gap: 8, alignSelf: "flex-start" }}>
@@ -2023,7 +2085,7 @@ function AssetsView({ assets, companies, jobs, onUpdate, onDelete, onNavigateCom
                 </div>
                 <span style={{ fontSize: 11, color: C.muted, fontWeight: 500, fontFamily: "ui-monospace, 'SF Mono', Menlo, monospace" }}>{ASSET_TYPE_LABELS[a.type]}</span>
               </div>
-              <div style={{ fontSize: 13, fontWeight: 600, color: C.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", lineHeight: 1.3 }}>{displayLabel}</div>
+              <div style={{ fontSize: 13, fontWeight: 600, color: C.text, lineHeight: 1.4 }}>{displayLabel}</div>
               {linkedCompany && (
                 <div style={{ display: "flex", alignItems: "center", gap: 7, marginTop: "auto" }}>
                   <CompanyLogo name={linkedCompany.name} logoUrl={linkedCompany.logoUrl || undefined} size={16} radius={3} noBorder />
@@ -2081,7 +2143,7 @@ const MOCK_ASSETS: Asset[] = [
   { id: "ast2", type: "Gmail link", label: "Thread: Jordan Kessler · Figma", assetUrl: "https://mail.google.com/mail/u/0/#inbox/mock", personName: "", personTitle: "", personEmail: "", personPhone: "", personLinkedin: "", personNotes: "", companyId: "c1", jobId: "j1", activityId: "", url: "" },
   { id: "ast3", type: "Contact", label: "Jordan Kessler", assetUrl: "", personName: "Jordan Kessler", personTitle: "Recruiter", personEmail: "jordan@figma.com", personPhone: "", personLinkedin: "", personNotes: "Main point of contact.", companyId: "c1", jobId: "j1", activityId: "", url: "" },
   { id: "ast4", type: "URL", label: "Stripe — Senior UX JD", assetUrl: "https://stripe.com/jobs", personName: "", personTitle: "", personEmail: "", personPhone: "", personLinkedin: "", personNotes: "", companyId: "c2", jobId: "j2", activityId: "", url: "" },
-  { id: "ast5", type: "Google Drive link", label: "Portfolio — Case Studies", assetUrl: "https://drive.google.com/file/d/mock123/view", personName: "", personTitle: "", personEmail: "", personPhone: "", personLinkedin: "", personNotes: "", companyId: "c1", jobId: "j1", activityId: "", url: "" },
+  { id: "ast5", type: "Document", label: "Portfolio — Case Studies", assetUrl: "https://drive.google.com/file/d/mock123/view", personName: "", personTitle: "", personEmail: "", personPhone: "", personLinkedin: "", personNotes: "", companyId: "c1", jobId: "j1", activityId: "", url: "" },
 ];
 
 // ── Main App ───────────────────────────────────────────────────────────────

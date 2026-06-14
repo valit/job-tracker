@@ -27,7 +27,7 @@ export type ActivityType =
   | "Note"
   | "Job created";
 
-export type AssetType = "URL" | "Gmail link" | "Google Drive link" | "Contact";
+export type AssetType = "URL" | "Gmail link" | "Document" | "Contact";
 export type PersonTitle = "Recruiter" | "Hiring Manager" | "Interviewer" | "Referral" | "Connection";
 
 export interface CompanyLink {
@@ -146,8 +146,7 @@ export function parseActivity(page: any): Activity {
     id: page.id,
     type: (getText(p.Type) as ActivityType) || "Note",
     date: getText(p.Date),
-    // Notes may be a rich_text field; fall back to Summary or Name title if absent
-    notes: getText(p.Notes) || getText(p.Summary) || getText(p.Name),
+    notes: getText(p.Notes),
     jobId: getRelationId(p.Job),
     jobName: "",
     url: page.url,
