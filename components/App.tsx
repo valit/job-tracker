@@ -21,32 +21,91 @@ function useIsMobile() {
   return isMobile;
 }
 
-function useSwipeNav(onPrev: (() => void) | null, onNext: (() => void) | null) {
-  const startX = useRef<number | null>(null);
-  const startY = useRef<number | null>(null);
+function useEdgeSwipeBack(onBack: () => void): React.RefObject<HTMLDivElement | null> {
+  const elRef = useRef<HTMLDivElement>(null);
+  const onBackRef = useRef(onBack);
+  useEffect(() => { onBackRef.current = onBack; });
+
   useEffect(() => {
+    const el = elRef.current;
+    if (!el) return;
+
+    // Push a sentinel history entry so Safari's system back gesture fires popstate
+    // (which we intercept) instead of navigating away to the previous page.
+    window.history.pushState({ edgeSwipeGuard: true }, "");
+
+    let navigatingBack = false;
+
+    const doBack = () => {
+      if (navigatingBack) return;
+      navigatingBack = true;
+      el.style.transition = "transform 250ms ease-out";
+      el.style.transform = "translateX(100vw)";
+      setTimeout(() => {
+        el.style.transition = "";
+        el.style.transform = "";
+        onBackRef.current();
+      }, 250);
+    };
+
+    // Safari's system back gesture (and our own JS gesture) both end up here.
+    const onPopState = () => {
+      window.history.pushState({ edgeSwipeGuard: true }, ""); // repush for next swipe
+      doBack();
+    };
+    window.addEventListener("popstate", onPopState);
+
+    let startX: number | null = null;
+    let startY: number | null = null;
+    let dragging = false;
+
     const onTouchStart = (e: TouchEvent) => {
-      startX.current = e.touches[0].clientX;
-      startY.current = e.touches[0].clientY;
+      const x = e.touches[0].clientX;
+      if (x > 50) return;
+      startX = x;
+      startY = e.touches[0].clientY;
+      dragging = false;
     };
+
+    const onTouchMove = (e: TouchEvent) => {
+      if (startX === null) return;
+      const dx = e.touches[0].clientX - startX;
+      const dy = e.touches[0].clientY - startY!;
+      if (!dragging) {
+        if (Math.abs(dy) > Math.abs(dx) * 0.75) { startX = null; return; }
+        if (dx > 6) dragging = true; else return;
+      }
+      e.preventDefault();
+      el.style.transition = "none";
+      el.style.transform = `translateX(${Math.max(0, dx)}px)`;
+    };
+
     const onTouchEnd = (e: TouchEvent) => {
-      if (startX.current === null || startY.current === null) return;
-      const dx = e.changedTouches[0].clientX - startX.current;
-      const dy = e.changedTouches[0].clientY - startY.current;
-      startX.current = null;
-      startY.current = null;
-      if (Math.abs(dx) < 50) return;
-      if (Math.abs(dx) < Math.abs(dy) * 1.5) return;
-      if (dx < 0 && onNext) onNext();
-      if (dx > 0 && onPrev) onPrev();
+      if (startX === null || !dragging) { startX = null; dragging = false; return; }
+      const dx = e.changedTouches[0].clientX - startX;
+      startX = null; dragging = false;
+      if (dx > window.innerWidth * 0.4) {
+        // Trigger popstate (which calls doBack) so both code paths converge there
+        window.history.back();
+      } else {
+        el.style.transition = "transform 250ms ease-out";
+        el.style.transform = "translateX(0)";
+        setTimeout(() => { el.style.transition = ""; el.style.transform = ""; }, 250);
+      }
     };
+
     document.addEventListener("touchstart", onTouchStart, { passive: true });
+    document.addEventListener("touchmove", onTouchMove, { passive: false });
     document.addEventListener("touchend", onTouchEnd, { passive: true });
     return () => {
+      window.removeEventListener("popstate", onPopState);
       document.removeEventListener("touchstart", onTouchStart);
+      document.removeEventListener("touchmove", onTouchMove);
       document.removeEventListener("touchend", onTouchEnd);
     };
-  }, [onPrev, onNext]);
+  }, []);
+
+  return elRef;
 }
 
 // ── Constants ──────────────────────────────────────────────────────────────
@@ -1360,19 +1419,7 @@ function JobDetailPage({ job, companies, jobs, activities, assets, onBack, onSta
   const [hoveredActivityId, setHoveredActivityId] = useState<string | null>(null);
   const [pendingStatus, setPendingStatus] = useState<JobStatus | null>(null);
 
-  // Swipe nav
-  const _JOB_STATUS_ORDER: JobStatus[] = ["In progress", "Applied (referred)", "Applied (no response)", "Want to apply", "Closed"];
-  const _sortedJobs = _JOB_STATUS_ORDER.flatMap(status =>
-    jobs.filter(j => !j.archived && j.status === status)
-        .sort((a, b) => (a.companyName || a.name).localeCompare(b.companyName || b.name))
-  );
-  const _jobIdx = _sortedJobs.findIndex(j => j.id === job.id);
-  const _prevJob = _jobIdx > 0 ? _sortedJobs[_jobIdx - 1] : null;
-  const _nextJob = _jobIdx < _sortedJobs.length - 1 ? _sortedJobs[_jobIdx + 1] : null;
-  useSwipeNav(
-    _prevJob && onNavigateJob ? () => onNavigateJob(_prevJob) : null,
-    _nextJob && onNavigateJob ? () => onNavigateJob(_nextJob) : null,
-  );
+  const swipeRef = useEdgeSwipeBack(onBack);
   const statusRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -1426,8 +1473,7 @@ function JobDetailPage({ job, companies, jobs, activities, assets, onBack, onSta
   };
 
   return (
-    <div style={{ maxWidth: 760, margin: "0 auto", paddingTop: 32 }}>
-      {/* Back */}
+    <div ref={swipeRef} style={{ maxWidth: 760, margin: "0 auto", paddingTop: 32 }}>
       {/* Back + prev/next */}
       {(() => {
         const STATUS_ORDER: JobStatus[] = ["In progress", "Applied (referred)", "Applied (no response)", "Want to apply", "Closed"];
@@ -1971,22 +2017,7 @@ function CompanyDetailPage({ company, companies, jobs, onBack, onUpdate, onDelet
 
   const companyJobs = jobs.filter(j => j.companyId === company.id);
 
-  // Swipe nav
-  const _openCount = (c: Company) => jobs.filter(j => j.companyId === c.id && !j.archived && j.status !== "Closed").length;
-  const _sortedCompanies = [...companies].sort((a, b) => {
-    const oa = _openCount(a), ob = _openCount(b);
-    if (oa === 0 && ob > 0) return 1;
-    if (ob === 0 && oa > 0) return -1;
-    if (oa !== ob) return ob - oa;
-    return a.name.localeCompare(b.name);
-  });
-  const _companyIdx = _sortedCompanies.findIndex(c => c.id === company.id);
-  const _prevCompany = _companyIdx > 0 ? _sortedCompanies[_companyIdx - 1] : null;
-  const _nextCompany = _companyIdx < _sortedCompanies.length - 1 ? _sortedCompanies[_companyIdx + 1] : null;
-  useSwipeNav(
-    _prevCompany && onNavigateCompany ? () => onNavigateCompany(_prevCompany) : null,
-    _nextCompany && onNavigateCompany ? () => onNavigateCompany(_nextCompany) : null,
-  );
+  const swipeRef = useEdgeSwipeBack(onBack);
 
   const saveName = async () => {
     if (logoUrlForm.length > 2000) {
@@ -2010,7 +2041,7 @@ function CompanyDetailPage({ company, companies, jobs, onBack, onUpdate, onDelet
   };
 
   return (
-    <div style={{ maxWidth: 760, margin: "0 auto", paddingTop: 32 }}>
+    <div ref={swipeRef} style={{ maxWidth: 760, margin: "0 auto", paddingTop: 32 }}>
       {/* Back + prev/next */}
       {(() => {
         const openCount = (c: Company) => jobs.filter(j => j.companyId === c.id && !j.archived && j.status !== "Closed").length;
@@ -2523,6 +2554,25 @@ export default function App() {
     { view: "assets", label: "Assets", Icon: Paperclip },
   ];
 
+  const [isNavCompact, setIsNavCompact] = useState(false);
+  useEffect(() => {
+    if (!isMobile) return;
+    let lastY = window.scrollY;
+    const onScroll = () => {
+      const y = window.scrollY;
+      const maxScroll = document.documentElement.scrollHeight - window.innerHeight;
+      if (y > lastY + 4) {
+        setIsNavCompact(true);
+      } else if (y < lastY - 4 && y <= maxScroll) {
+        // Only expand on genuine upward scroll — not iOS bounce settling back from past the bottom
+        setIsNavCompact(false);
+      }
+      lastY = y;
+    };
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, [isMobile]);
+
   return (
     <div style={{ minHeight: "100vh", background: C.bg, fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif", color: C.text }}>
       {/* Desktop top nav — hidden on mobile */}
@@ -2555,7 +2605,7 @@ export default function App() {
       )}
 
       {/* Main */}
-      <main style={{ padding: isMobile ? "20px 16px" : "28px 32px", paddingBottom: isMobile ? `calc(env(safe-area-inset-bottom, 20px) + 104px)` : "28px" }}>
+      <main style={{ padding: isMobile ? "20px 16px" : "28px 32px", paddingBottom: isMobile ? `calc(env(safe-area-inset-bottom, 20px) + ${isNavCompact ? "84px" : "104px"})` : "28px", transition: isMobile ? "padding-bottom 200ms ease-out" : undefined }}>
         {loading && (
           <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "60vh", gap: 12, color: C.muted }}>
             <Loader2 size={22} className="animate-spin" /> Loading from Notion…
@@ -2652,8 +2702,8 @@ export default function App() {
               border: "1px solid rgba(255,255,255,0.6)",
               boxShadow: "0 8px 32px rgba(0,0,0,0.12), 0 2px 8px rgba(0,0,0,0.08)",
               padding: "6px",
-              gap: 0,
               pointerEvents: "auto",
+              transition: "all 200ms ease-out",
             }}>
               {/* Sliding active pill */}
               <div style={{
@@ -2673,15 +2723,22 @@ export default function App() {
                   <button key={v} onClick={() => navTo(v)} style={{
                     position: "relative", display: "flex", flexDirection: "column",
                     alignItems: "center", justifyContent: "center",
-                    gap: 3, padding: "10px 28px",
+                    gap: isNavCompact ? 0 : 3,
+                    padding: isNavCompact ? "10px 22px" : "10px 28px",
                     background: "none", border: "none", cursor: "pointer",
                     color: active ? "#1C3830" : "#9CA3AF",
                     borderRadius: 9999,
-                    transition: "color 200ms ease-out",
-                    minWidth: 80,
+                    transition: "color 200ms ease-out, padding 200ms ease-out, gap 200ms ease-out",
+                    minWidth: isNavCompact ? 60 : 80,
                   }}>
                     <Icon size={21} strokeWidth={active ? 2.2 : 1.6} />
-                    <span style={{ fontSize: 10, fontWeight: active ? 650 : 400, letterSpacing: 0.3 }}>{label}</span>
+                    <span style={{
+                      fontSize: 10, fontWeight: active ? 650 : 400, letterSpacing: 0.3,
+                      maxHeight: isNavCompact ? 0 : 16,
+                      opacity: isNavCompact ? 0 : 1,
+                      overflow: "hidden",
+                      transition: "max-height 200ms ease-out, opacity 200ms ease-out",
+                    }}>{label}</span>
                   </button>
                 );
               })}
