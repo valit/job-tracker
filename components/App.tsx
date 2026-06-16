@@ -21,6 +21,34 @@ function useIsMobile() {
   return isMobile;
 }
 
+function useSwipeNav(onPrev: (() => void) | null, onNext: (() => void) | null) {
+  const startX = useRef<number | null>(null);
+  const startY = useRef<number | null>(null);
+  useEffect(() => {
+    const onTouchStart = (e: TouchEvent) => {
+      startX.current = e.touches[0].clientX;
+      startY.current = e.touches[0].clientY;
+    };
+    const onTouchEnd = (e: TouchEvent) => {
+      if (startX.current === null || startY.current === null) return;
+      const dx = e.changedTouches[0].clientX - startX.current;
+      const dy = e.changedTouches[0].clientY - startY.current;
+      startX.current = null;
+      startY.current = null;
+      if (Math.abs(dx) < 50) return;
+      if (Math.abs(dx) < Math.abs(dy) * 1.5) return;
+      if (dx < 0 && onNext) onNext();
+      if (dx > 0 && onPrev) onPrev();
+    };
+    document.addEventListener("touchstart", onTouchStart, { passive: true });
+    document.addEventListener("touchend", onTouchEnd, { passive: true });
+    return () => {
+      document.removeEventListener("touchstart", onTouchStart);
+      document.removeEventListener("touchend", onTouchEnd);
+    };
+  }, [onPrev, onNext]);
+}
+
 // ── Constants ──────────────────────────────────────────────────────────────
 
 const JOB_STATUSES: JobStatus[] = [
@@ -1323,6 +1351,20 @@ function JobDetailPage({ job, companies, jobs, activities, assets, onBack, onSta
   const [editingActivity, setEditingActivity] = useState<Activity | null>(null);
   const [hoveredActivityId, setHoveredActivityId] = useState<string | null>(null);
   const [pendingStatus, setPendingStatus] = useState<JobStatus | null>(null);
+
+  // Swipe nav
+  const _JOB_STATUS_ORDER: JobStatus[] = ["In progress", "Applied (referred)", "Applied (no response)", "Want to apply", "Closed"];
+  const _sortedJobs = _JOB_STATUS_ORDER.flatMap(status =>
+    jobs.filter(j => !j.archived && j.status === status)
+        .sort((a, b) => (a.companyName || a.name).localeCompare(b.companyName || b.name))
+  );
+  const _jobIdx = _sortedJobs.findIndex(j => j.id === job.id);
+  const _prevJob = _jobIdx > 0 ? _sortedJobs[_jobIdx - 1] : null;
+  const _nextJob = _jobIdx < _sortedJobs.length - 1 ? _sortedJobs[_jobIdx + 1] : null;
+  useSwipeNav(
+    _prevJob && onNavigateJob ? () => onNavigateJob(_prevJob) : null,
+    _nextJob && onNavigateJob ? () => onNavigateJob(_nextJob) : null,
+  );
   const statusRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -1921,6 +1963,23 @@ function CompanyDetailPage({ company, companies, jobs, onBack, onUpdate, onDelet
 
   const companyJobs = jobs.filter(j => j.companyId === company.id);
 
+  // Swipe nav
+  const _openCount = (c: Company) => jobs.filter(j => j.companyId === c.id && !j.archived && j.status !== "Closed").length;
+  const _sortedCompanies = [...companies].sort((a, b) => {
+    const oa = _openCount(a), ob = _openCount(b);
+    if (oa === 0 && ob > 0) return 1;
+    if (ob === 0 && oa > 0) return -1;
+    if (oa !== ob) return ob - oa;
+    return a.name.localeCompare(b.name);
+  });
+  const _companyIdx = _sortedCompanies.findIndex(c => c.id === company.id);
+  const _prevCompany = _companyIdx > 0 ? _sortedCompanies[_companyIdx - 1] : null;
+  const _nextCompany = _companyIdx < _sortedCompanies.length - 1 ? _sortedCompanies[_companyIdx + 1] : null;
+  useSwipeNav(
+    _prevCompany && onNavigateCompany ? () => onNavigateCompany(_prevCompany) : null,
+    _nextCompany && onNavigateCompany ? () => onNavigateCompany(_nextCompany) : null,
+  );
+
   const saveName = async () => {
     if (logoUrlForm.length > 2000) {
       alert(`Logo URL is too long (${logoUrlForm.length} chars). Notion has a 2000-character limit. Please use a shorter URL — upload the image to imgur.com or similar and paste that link instead.`);
@@ -2488,7 +2547,7 @@ export default function App() {
       )}
 
       {/* Main */}
-      <main style={{ padding: isMobile ? "20px 16px" : "28px 32px", paddingBottom: isMobile ? `calc(72px + env(safe-area-inset-bottom, 16px))` : "28px" }}>
+      <main style={{ padding: isMobile ? "20px 16px" : "28px 32px", paddingBottom: isMobile ? `calc(env(safe-area-inset-bottom, 20px) + 104px)` : "28px" }}>
         {loading && (
           <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "60vh", gap: 12, color: C.muted }}>
             <Loader2 size={22} className="animate-spin" /> Loading from Notion…
