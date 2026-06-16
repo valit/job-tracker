@@ -95,6 +95,20 @@ const ASSET_BG: Record<AssetType, string> = {
 
 const PERSON_TITLES: PersonTitle[] = ["Recruiter", "Hiring Manager", "Interviewer", "Referral", "Connection"];
 
+function LinkedInIcon({ size = 16 }: { size?: number; color?: string }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+      <rect width="24" height="24" rx="4" fill="#0A66C2"/>
+      <path d="M7.75 10h-2.5v7.5h2.5V10zm-1.25-4a1.25 1.25 0 1 0 0 2.5A1.25 1.25 0 0 0 6.5 6zm11 4c-1.38 0-2.3.6-2.75 1.17V10h-2.5v7.5h2.5v-4c0-.83.67-1.5 1.5-1.5s1.5.67 1.5 1.5v4h2.5v-4.25C20 11.57 18.93 10 17.5 10z" fill="#fff"/>
+    </svg>
+  );
+}
+
+function getAssetIcon(asset: { type: AssetType; assetUrl?: string }) {
+  if (asset.type === "URL" && asset.assetUrl?.includes("linkedin.com")) return LinkedInIcon;
+  return ASSET_ICONS[asset.type];
+}
+
 // ── Design tokens ──────────────────────────────────────────────────────────
 
 const C = {
@@ -333,7 +347,7 @@ function MentionTextarea({ value, onChange, placeholder, assets }: {
             <div style={{ padding: "10px 14px", fontSize: 13, color: C.muted }}>{assets.length === 0 ? "No assets available" : "No matching assets"}</div>
           ) : (
             filtered.map((a, i) => {
-              const AIcon = ASSET_ICONS[a.type] || Link;
+              const AIcon = getAssetIcon(a) || Link;
               return (
                 <div key={a.id} onMouseDown={e => { e.preventDefault(); insertMention(a); }}
                   style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 14px", cursor: "pointer", background: i === selectedIdx ? C.bg : "#fff", fontSize: 13, color: C.text }}
@@ -890,7 +904,7 @@ function AddLinkModal({ onClose, onSave }: {
 
   const save = () => {
     if (!url.trim()) return;
-    onSave({ label: label.trim() || linkType, url: url.trim(), type: linkType });
+    onSave({ label: label.trim() || linkType, url: url.trim(), type: "URL" });
   };
 
   return (
@@ -997,6 +1011,7 @@ function AddAssetModal({ companies, jobs, linkTo, onClose, onSave }: {
   const assetFormDirty = form.label !== "" || form.assetUrl !== "" || form.personName !== "" || form.personEmail !== "" || form.personPhone !== "" || form.personLinkedin !== "" || form.personNotes !== "";
   return (
     <Modal title="New asset" onClose={onClose} onBack={() => setStep("pick")} isDirty={assetFormDirty}>
+      <div onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey && (e.target as HTMLElement).tagName !== "TEXTAREA" && (e.target as HTMLElement).tagName !== "SELECT") { e.preventDefault(); save(); } }}>
       <div style={{ display: "inline-flex", alignItems: "center", gap: 6, background: ASSET_BG[assetType], color: ASSET_COLORS[assetType], padding: "4px 10px", borderRadius: 20, fontSize: 11, fontWeight: 600, marginBottom: 20 }}>
         <TypeIcon size={12} /> {assetType}
       </div>
@@ -1048,6 +1063,7 @@ function AddAssetModal({ companies, jobs, linkTo, onClose, onSave }: {
           {saving ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />} Save
         </Btn>
         <Btn variant="ghost" onClick={onClose}>Cancel</Btn>
+      </div>
       </div>
     </Modal>
   );
@@ -1129,7 +1145,7 @@ function EditAssetModal({ asset, companies, jobs, onClose, onSave, onDelete, onN
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", zIndex: 1000, display: "flex", alignItems: isMobile ? "flex-end" : "center", justifyContent: "center", padding: isMobile ? 0 : 16 }} onClick={onClose}>
       <div style={{ background: "#fff", borderRadius: isMobile ? "16px 16px 0 0" : 12, width: "100%", maxWidth: isMobile ? "100%" : 520, maxHeight: isMobile ? "92vh" : "90vh", overflow: "auto", boxShadow: "0 4px 24px rgba(0,0,0,0.08)", position: "relative" }} onClick={e => e.stopPropagation()}>
-        <div style={{ padding: isMobile ? "20px 20px" : "24px 28px" }}>
+        <div style={{ padding: isMobile ? "20px 20px" : "24px 28px" }} onKeyDown={e => { if (editing && e.key === "Enter" && !e.shiftKey && (e.target as HTMLElement).tagName !== "TEXTAREA" && (e.target as HTMLElement).tagName !== "SELECT") { e.preventDefault(); save(); } }}>
           <button onClick={onClose} style={{ position: "absolute", right: isMobile ? 16 : 20, top: isMobile ? 16 : 20, background: "none", border: "none", cursor: "pointer", color: C.muted, display: "flex" }}>
             <X size={18} />
           </button>
@@ -1292,6 +1308,7 @@ function JobDetailPage({ job, companies, jobs, activities, assets, onBack, onSta
   const [showAddActivity, setShowAddActivity] = useState(false);
   const [showAddAsset, setShowAddAsset] = useState(false);
   const [editingAsset, setEditingAsset] = useState<Asset | null>(null);
+  const [viewingCompanyLink, setViewingCompanyLink] = useState<{ lnk: CompanyLink; company: Company } | null>(null);
   const [statusDropdown, setStatusDropdown] = useState(false);
   const [editHeader, setEditHeader] = useState(false);
   const [editNotes, setEditNotes] = useState(false);
@@ -1361,9 +1378,39 @@ function JobDetailPage({ job, companies, jobs, activities, assets, onBack, onSta
   return (
     <div style={{ maxWidth: 760, margin: "0 auto", paddingTop: 32 }}>
       {/* Back */}
-      <button onClick={onBack} style={{ background: "none", border: "none", cursor: "pointer", display: "flex", alignItems: "center", gap: 6, color: C.muted, fontSize: 13, fontWeight: 500, marginBottom: 28, padding: 0 }}>
-        <ChevronLeft size={16} /> All jobs
-      </button>
+      {/* Back + prev/next */}
+      {(() => {
+        const STATUS_ORDER: JobStatus[] = ["In progress", "Applied (referred)", "Applied (no response)", "Want to apply", "Closed"];
+        const sortedJobs = STATUS_ORDER.flatMap(status =>
+          jobs.filter(j => !j.archived && j.status === status)
+              .sort((a, b) => (a.companyName || a.name).localeCompare(b.companyName || b.name))
+        );
+        const idx = sortedJobs.findIndex(j => j.id === job.id);
+        const total = sortedJobs.length;
+        const pos = idx + 1;
+        const prevJob = idx > 0 ? sortedJobs[idx - 1] : null;
+        const nextJob = idx < total - 1 ? sortedJobs[idx + 1] : null;
+        return (
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 28 }}>
+            <button onClick={onBack} style={{ background: "none", border: "none", cursor: "pointer", display: "flex", alignItems: "center", gap: 6, color: C.muted, fontSize: 13, fontWeight: 500, padding: 0 }}>
+              <ChevronLeft size={16} /> All jobs
+            </button>
+            {total > 0 && (
+              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <button onClick={() => prevJob && onNavigateJob?.(prevJob)} disabled={!prevJob}
+                  style={{ background: "none", border: "none", cursor: prevJob ? "pointer" : "default", color: prevJob ? C.muted : C.border, padding: 2, display: "flex" }}>
+                  <ChevronLeft size={16} />
+                </button>
+                <span style={{ fontSize: 13, color: C.muted, fontVariantNumeric: "tabular-nums" }}>{pos} of {total}</span>
+                <button onClick={() => nextJob && onNavigateJob?.(nextJob)} disabled={!nextJob}
+                  style={{ background: "none", border: "none", cursor: nextJob ? "pointer" : "default", color: nextJob ? C.muted : C.border, padding: 2, display: "flex" }}>
+                  <ChevronRight size={16} />
+                </button>
+              </div>
+            )}
+          </div>
+        );
+      })()}
 
       {/* Header */}
       <div style={{ display: "flex", alignItems: "flex-start", gap: 20, marginBottom: 32 }}>
@@ -1401,7 +1448,14 @@ function JobDetailPage({ job, companies, jobs, activities, assets, onBack, onSta
                   <Pencil size={14} />
                 </button>
               </h1>
-              <div style={{ fontSize: 15, color: C.muted, marginTop: 6 }}>{job.companyName}</div>
+              {(() => {
+                const co = companies.find(c => c.id === job.companyId);
+                return co && onNavigateCompany ? (
+                  <button onClick={() => onNavigateCompany(co)} style={{ background: "none", border: "none", padding: 0, cursor: "pointer", fontSize: 15, color: C.muted, marginTop: 6, textDecoration: "underline", display: "block" }}>{job.companyName}</button>
+                ) : (
+                  <div style={{ fontSize: 15, color: C.muted, marginTop: 6 }}>{job.companyName}</div>
+                );
+              })()}
               {job.location && <div style={{ fontSize: 14, color: C.muted, marginTop: 5 }}>{job.location}</div>}
             </div>
           )}
@@ -1506,24 +1560,41 @@ function JobDetailPage({ job, companies, jobs, activities, assets, onBack, onSta
             <Plus size={13} /> Add asset
           </button>
         </div>
-        {loadingPanel ? null : myAssets.length === 0 ? (
-          <div style={{ fontSize: 13, color: C.muted }}>No assets yet.</div>
-        ) : (
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-            {myAssets.map(a => {
-              const AIcon = ASSET_ICONS[a.type];
-              const rawLabel = a.type === "Contact" ? (a.personName || a.label) : a.label;
-              const label = (a.type === "Gmail link" && rawLabel.startsWith("http")) ? "Gmail thread" : rawLabel;
-              return (
-                <button key={a.id} onClick={() => setEditingAsset(a)}
-                  style={{ display: "inline-flex", alignItems: "center", gap: 7, background: "#fff", border: `1px solid ${C.border}`, borderRadius: 8, padding: "9px 13px", fontSize: 13, cursor: "pointer", color: C.text, maxWidth: 320, overflow: "hidden" }}>
-                  <AIcon size={13} color={ASSET_COLORS[a.type]} style={{ flexShrink: 0 }} />
-                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{label}</span>
-                </button>
-              );
-            })}
-          </div>
-        )}
+        {(() => {
+          const jobCompany = companies.find(c => c.id === job.companyId);
+          const companyLinks = jobCompany?.links ?? [];
+          const hasAny = companyLinks.length > 0 || myAssets.length > 0;
+          if (loadingPanel) return null;
+          if (!hasAny) return <div style={{ fontSize: 13, color: C.muted }}>No assets yet.</div>;
+          return (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+              {companyLinks.map((lnk, i) => {
+                const isLinkedIn = lnk.url.includes("linkedin.com");
+                return (
+                  <button key={i} onClick={() => jobCompany && setViewingCompanyLink({ lnk, company: jobCompany })}
+                    style={{ display: "inline-flex", alignItems: "center", gap: 7, background: "#fff", border: `1px solid ${C.border}`, borderRadius: 8, padding: "9px 13px", fontSize: 13, cursor: "pointer", color: C.text, maxWidth: 320, overflow: "hidden" }}>
+                    {isLinkedIn
+                      ? <LinkedInIcon size={13} />
+                      : <CompanyLogo name={jobCompany!.name} logoUrl={jobCompany!.logoUrl || undefined} size={13} radius={3} noBorder />}
+                    <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{lnk.label}</span>
+                  </button>
+                );
+              })}
+              {myAssets.map(a => {
+                const AIcon = getAssetIcon(a);
+                const rawLabel = a.type === "Contact" ? (a.personName || a.label) : a.label;
+                const label = (a.type === "Gmail link" && rawLabel.startsWith("http")) ? "Gmail thread" : rawLabel;
+                return (
+                  <button key={a.id} onClick={() => setEditingAsset(a)}
+                    style={{ display: "inline-flex", alignItems: "center", gap: 7, background: "#fff", border: `1px solid ${C.border}`, borderRadius: 8, padding: "9px 13px", fontSize: 13, cursor: "pointer", color: C.text, maxWidth: 320, overflow: "hidden" }}>
+                    <AIcon size={13} color={ASSET_COLORS[a.type]} style={{ flexShrink: 0 }} />
+                    <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{label}</span>
+                  </button>
+                );
+              })}
+            </div>
+          );
+        })()}
       </div>
 
       {/* Activity */}
@@ -1656,6 +1727,39 @@ function JobDetailPage({ job, companies, jobs, activities, assets, onBack, onSta
           onNavigateJob={onNavigateJob}
         />
       )}
+      {viewingCompanyLink && (
+        <Modal title={viewingCompanyLink.lnk.label} onClose={() => setViewingCompanyLink(null)}>
+          <div style={{ display: "inline-flex", alignItems: "center", gap: 6, background: ASSET_BG["URL"], color: ASSET_COLORS["URL"], padding: "4px 10px", borderRadius: 20, fontSize: 11, fontWeight: 600, marginBottom: 20 }}>
+            {viewingCompanyLink.lnk.url.includes("linkedin.com")
+              ? <LinkedInIcon size={12} />
+              : <Link size={12} />} URL
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
+            <CompanyLogo name={viewingCompanyLink.company.name} logoUrl={viewingCompanyLink.company.logoUrl || undefined} size={28} radius={6} />
+            <span style={{ fontSize: 13, color: C.muted }}>from {viewingCompanyLink.company.name}</span>
+          </div>
+          <h2 style={{ fontSize: 20, fontWeight: 600, fontFamily: "Georgia, 'Times New Roman', serif", color: C.text, marginBottom: 14 }}>{viewingCompanyLink.lnk.label}</h2>
+          <div style={{ marginBottom: 20 }}>
+            <a href={viewingCompanyLink.lnk.url} target="_blank" rel="noreferrer"
+              style={{ fontSize: 13, color: "#2563EB", textDecoration: "none", display: "flex", alignItems: "center", gap: 6, overflow: "hidden", maxWidth: 380 }}>
+              <ExternalLink size={13} style={{ flexShrink: 0 }} />
+              <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{viewingCompanyLink.lnk.url}</span>
+            </a>
+          </div>
+          <div style={{ borderTop: `1px solid ${C.border}`, paddingTop: 16 }}>
+            <div style={{ display: "flex", gap: 8 }}>
+              {onNavigateCompany && (
+                <Btn variant="ghost" onClick={() => { setViewingCompanyLink(null); onNavigateCompany(viewingCompanyLink.company); }}>
+                  Go to {viewingCompanyLink.company.name}
+                </Btn>
+              )}
+              <div style={{ marginLeft: "auto" }}>
+                <Btn variant="ghost" onClick={() => setViewingCompanyLink(null)}>Close</Btn>
+              </div>
+            </div>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }
@@ -1718,37 +1822,50 @@ function JobsView({ jobs, activities, onSelect }: {
         </div>
       )}
 
-      <div style={{ display: "grid", gap: 8 }}>
-        {filtered.map(j => (
-          <div key={j.id} onClick={() => onSelect(j)}
-            style={{ background: "#fff", borderRadius: 12, padding: isMobile ? "12px 16px" : "22px 20px", cursor: "pointer", border: `1px solid ${C.border}`, borderLeft: `3px solid ${STATUS_BORDER[j.status]}`, transition: "box-shadow .15s", display: "flex", alignItems: isMobile ? "flex-start" : "center", gap: 16, minWidth: 0, overflow: "hidden" }}
-            onMouseEnter={e => (e.currentTarget as HTMLDivElement).style.boxShadow = "0 2px 14px rgba(0,0,0,0.07)"}
-            onMouseLeave={e => (e.currentTarget as HTMLDivElement).style.boxShadow = "none"}>
-            <CompanyLogo name={j.companyName || "?"} logoUrl={j.companyLogoUrl || undefined} size={40} radius={10} />
-            {isMobile ? (
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 15, fontWeight: 500, color: C.text, marginBottom: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{j.name}</div>
-                <div style={{ fontSize: 13, color: C.muted, marginBottom: 8, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{j.companyName}{j.location ? ` · ${j.location}` : ""}</div>
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                  <StatusBadge status={j.status} />
-                  {(() => { const d = lastActivity[j.id] || jobCreatedDate[j.id]; const fmt = d ? formatDate(d) : ""; return fmt ? <span style={{ fontSize: 11, color: C.muted }}>{fmt}</span> : null; })()}
-                </div>
+      {(() => {
+        const STATUS_ORDER: JobStatus[] = ["In progress", "Applied (referred)", "Applied (no response)", "Want to apply", "Closed"];
+        const sortKey = (j: Job) => (j.companyName || j.name || "").toLowerCase();
+        const groups = STATUS_ORDER
+          .map(status => filtered.filter(j => j.status === status).sort((a, b) => sortKey(a).localeCompare(sortKey(b))))
+          .filter(g => g.length > 0);
+        return (
+          <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+            {groups.map((group, gi) => (
+              <div key={gi} style={{ display: "grid", gap: 8 }}>
+                {group.map(j => (
+                  <div key={j.id} onClick={() => onSelect(j)}
+                    style={{ background: "#fff", borderRadius: 12, padding: isMobile ? "12px 16px" : "22px 20px", cursor: "pointer", border: `1px solid ${C.border}`, borderLeft: `3px solid ${STATUS_BORDER[j.status]}`, transition: "box-shadow .15s", display: "flex", alignItems: isMobile ? "flex-start" : "center", gap: 16, minWidth: 0, overflow: "hidden" }}
+                    onMouseEnter={e => (e.currentTarget as HTMLDivElement).style.boxShadow = "0 2px 14px rgba(0,0,0,0.07)"}
+                    onMouseLeave={e => (e.currentTarget as HTMLDivElement).style.boxShadow = "none"}>
+                    <CompanyLogo name={j.companyName || "?"} logoUrl={j.companyLogoUrl || undefined} size={40} radius={10} />
+                    {isMobile ? (
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 15, fontWeight: 500, color: C.text, marginBottom: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{j.name}</div>
+                        <div style={{ fontSize: 13, color: C.muted, marginBottom: 8, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{j.companyName}{j.location ? ` · ${j.location}` : ""}</div>
+                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                          <StatusBadge status={j.status} />
+                          {(() => { const d = lastActivity[j.id] || jobCreatedDate[j.id]; const fmt = d ? formatDate(d) : ""; return fmt ? <span style={{ fontSize: 11, color: C.muted }}>{fmt}</span> : null; })()}
+                        </div>
+                      </div>
+                    ) : (
+                      <>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: 15, fontWeight: 500, color: C.text, marginBottom: 3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 400 }}>{j.name}</div>
+                          <div style={{ fontSize: 13, color: C.muted }}>{j.companyName}{j.location ? ` · ${j.location}` : ""}</div>
+                        </div>
+                        <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 9, flexShrink: 0 }}>
+                          <StatusBadge status={j.status} />
+                          {(() => { const d = lastActivity[j.id] || jobCreatedDate[j.id]; const fmt = d ? formatDate(d) : ""; return fmt ? <span style={{ fontSize: 11, color: C.muted }}>{fmt}</span> : null; })()}
+                        </div>
+                      </>
+                    )}
+                  </div>
+                ))}
               </div>
-            ) : (
-              <>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 15, fontWeight: 500, color: C.text, marginBottom: 3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 400 }}>{j.name}</div>
-                  <div style={{ fontSize: 13, color: C.muted }}>{j.companyName}{j.location ? ` · ${j.location}` : ""}</div>
-                </div>
-                <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 9, flexShrink: 0 }}>
-                  <StatusBadge status={j.status} />
-                  {(() => { const d = lastActivity[j.id] || jobCreatedDate[j.id]; const fmt = d ? formatDate(d) : ""; return fmt ? <span style={{ fontSize: 11, color: C.muted }}>{fmt}</span> : null; })()}
-                </div>
-              </>
-            )}
+            ))}
           </div>
-        ))}
-      </div>
+        );
+      })()}
 
       {/* Archived disclosure */}
       {archivedJobs.length > 0 && (
@@ -1786,12 +1903,13 @@ function JobsView({ jobs, activities, onSelect }: {
 
 // ── Company Detail Page ────────────────────────────────────────────────────
 
-function CompanyDetailPage({ company, jobs, onBack, onUpdate, onDelete, onSelectJob }: {
-  company: Company; jobs: Job[];
+function CompanyDetailPage({ company, companies, jobs, onBack, onUpdate, onDelete, onSelectJob, onNavigateCompany }: {
+  company: Company; companies: Company[]; jobs: Job[];
   onBack: () => void;
   onUpdate: (updated: Company) => void;
   onDelete: (id: string) => void;
   onSelectJob: (j: Job) => void;
+  onNavigateCompany?: (c: Company) => void;
 }) {
   const [editingName, setEditingName] = useState(false);
   const [nameForm, setNameForm] = useState(company.name);
@@ -1826,9 +1944,42 @@ function CompanyDetailPage({ company, jobs, onBack, onUpdate, onDelete, onSelect
 
   return (
     <div style={{ maxWidth: 760, margin: "0 auto", paddingTop: 32 }}>
-      <button onClick={onBack} style={{ background: "none", border: "none", cursor: "pointer", display: "flex", alignItems: "center", gap: 6, color: C.muted, fontSize: 13, fontWeight: 500, marginBottom: 28, padding: 0 }}>
-        <ChevronLeft size={16} /> All companies
-      </button>
+      {/* Back + prev/next */}
+      {(() => {
+        const openCount = (c: Company) => jobs.filter(j => j.companyId === c.id && !j.archived && j.status !== "Closed").length;
+        const sortedCompanies = [...companies].sort((a, b) => {
+          const oa = openCount(a), ob = openCount(b);
+          if (oa === 0 && ob > 0) return 1;
+          if (ob === 0 && oa > 0) return -1;
+          if (oa !== ob) return ob - oa;
+          return a.name.localeCompare(b.name);
+        });
+        const idx = sortedCompanies.findIndex(c => c.id === company.id);
+        const total = sortedCompanies.length;
+        const pos = idx + 1;
+        const prevCompany = idx > 0 ? sortedCompanies[idx - 1] : null;
+        const nextCompany = idx < total - 1 ? sortedCompanies[idx + 1] : null;
+        return (
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 28 }}>
+            <button onClick={onBack} style={{ background: "none", border: "none", cursor: "pointer", display: "flex", alignItems: "center", gap: 6, color: C.muted, fontSize: 13, fontWeight: 500, padding: 0 }}>
+              <ChevronLeft size={16} /> All companies
+            </button>
+            {total > 0 && (
+              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <button onClick={() => prevCompany && onNavigateCompany?.(prevCompany)} disabled={!prevCompany}
+                  style={{ background: "none", border: "none", cursor: prevCompany ? "pointer" : "default", color: prevCompany ? C.muted : C.border, padding: 2, display: "flex" }}>
+                  <ChevronLeft size={16} />
+                </button>
+                <span style={{ fontSize: 13, color: C.muted, fontVariantNumeric: "tabular-nums" }}>{pos} of {total}</span>
+                <button onClick={() => nextCompany && onNavigateCompany?.(nextCompany)} disabled={!nextCompany}
+                  style={{ background: "none", border: "none", cursor: nextCompany ? "pointer" : "default", color: nextCompany ? C.muted : C.border, padding: 2, display: "flex" }}>
+                  <ChevronRight size={16} />
+                </button>
+              </div>
+            )}
+          </div>
+        );
+      })()}
 
       <div style={{ display: "flex", alignItems: "center", gap: 20, marginBottom: 36 }}>
         <CompanyLogo name={company.name} logoUrl={company.logoUrl || undefined} size={56} radius={12} />
@@ -1903,7 +2054,7 @@ function CompanyDetailPage({ company, jobs, onBack, onUpdate, onDelete, onSelect
                   <div style={{ fontSize: 14, fontWeight: 500, color: C.text }}>{lnk.label}</div>
                   <div style={{ fontSize: 11, color: C.muted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontFamily: "ui-monospace, 'SF Mono', Menlo, monospace", marginTop: 6 }}>{lnk.url}</div>
                 </div>
-                <span style={{ fontSize: 11, background: C.border, color: C.muted, borderRadius: 6, padding: "3px 8px", flexShrink: 0, fontFamily: "ui-monospace, 'SF Mono', Menlo, monospace" }}>{lnk.type.toLowerCase().replace(" site", "")}</span>
+                <span style={{ fontSize: 11, background: C.border, color: C.muted, borderRadius: 6, padding: "3px 8px", flexShrink: 0, fontFamily: "ui-monospace, 'SF Mono', Menlo, monospace" }}>{lnk.label.toLowerCase().replace(" site", "")}</span>
               </a>
             ))}
           </div>
@@ -2067,7 +2218,7 @@ function AssetsView({ assets, companies, jobs, onUpdate, onDelete, onNavigateCom
 
       <div style={{ display: "grid", gridTemplateColumns: isMobile ? "repeat(2, 1fr)" : "repeat(3, 1fr)", gap: 8 }}>
         {filtered.map(a => {
-          const AIcon = ASSET_ICONS[a.type];
+          const AIcon = getAssetIcon(a);
           const isPerson = a.type === "Contact";
           const isGmail = a.type === "Gmail link";
           const rawLabel = isPerson ? (a.personName || a.label) : a.label;
@@ -2373,11 +2524,12 @@ export default function App() {
             )}
             {view === "companies" && selectedCompany && (
               <CompanyDetailPage
-                company={selectedCompany} jobs={jobs}
+                company={selectedCompany} companies={companies} jobs={jobs}
                 onBack={() => setSelectedCompany(null)}
                 onUpdate={updated => { setCompanies(cs => cs.map(c => c.id === updated.id ? updated : c)); setSelectedCompany(updated); }}
                 onDelete={id => { setCompanies(cs => cs.filter(c => c.id !== id)); setSelectedCompany(null); }}
                 onSelectJob={j => { setView("jobs"); setSelectedJob(j); }}
+                onNavigateCompany={c => setSelectedCompany(c)}
               />
             )}
             {view === "assets" && (
@@ -2420,20 +2572,56 @@ export default function App() {
         />
       )}
 
-      {/* Mobile bottom tab bar */}
-      {isMobile && (
-        <nav style={{ position: "fixed", bottom: 0, left: 0, right: 0, zIndex: 900, background: "#fff", borderTop: `1px solid ${C.border}`, display: "flex", paddingBottom: "env(safe-area-inset-bottom, 0px)" }}>
-          {MOBILE_TABS.map(({ view: v, label, Icon }) => {
-            const active = view === v;
-            return (
-              <button key={v} onClick={() => navTo(v)} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 4, padding: "10px 0", background: "none", border: "none", cursor: "pointer", color: active ? "#1B3A2F" : "#9CA3AF" }}>
-                <Icon size={22} strokeWidth={active ? 2 : 1.5} />
-                <span style={{ fontSize: 10, fontWeight: active ? 600 : 400, letterSpacing: 0.2 }}>{label}</span>
-              </button>
-            );
-          })}
-        </nav>
-      )}
+      {/* Mobile bottom tab bar — floating frosted pill */}
+      {isMobile && (() => {
+        const activeIdx = MOBILE_TABS.findIndex(t => t.view === view);
+        return (
+          <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, zIndex: 900, display: "flex", justifyContent: "center", paddingBottom: "calc(env(safe-area-inset-bottom, 20px) + 20px)", pointerEvents: "none" }}>
+            <nav style={{
+              position: "relative", display: "flex", alignItems: "center",
+              background: "rgba(255,255,255,0.72)",
+              backdropFilter: "blur(20px)", WebkitBackdropFilter: "blur(20px)",
+              borderRadius: 9999,
+              border: "1px solid rgba(255,255,255,0.6)",
+              boxShadow: "0 8px 32px rgba(0,0,0,0.12), 0 2px 8px rgba(0,0,0,0.08)",
+              padding: "6px",
+              gap: 0,
+              pointerEvents: "auto",
+            }}>
+              {/* Sliding active pill */}
+              <div style={{
+                position: "absolute",
+                top: 6,
+                left: `calc(6px + ${activeIdx} * (100% - 12px) / ${MOBILE_TABS.length})`,
+                width: `calc((100% - 12px) / ${MOBILE_TABS.length})`,
+                height: "calc(100% - 12px)",
+                background: "rgba(28,56,48,0.10)",
+                borderRadius: 9999,
+                transition: "left 200ms ease-out",
+                pointerEvents: "none",
+              }} />
+              {MOBILE_TABS.map(({ view: v, label, Icon }) => {
+                const active = view === v;
+                return (
+                  <button key={v} onClick={() => navTo(v)} style={{
+                    position: "relative", display: "flex", flexDirection: "column",
+                    alignItems: "center", justifyContent: "center",
+                    gap: 3, padding: "10px 28px",
+                    background: "none", border: "none", cursor: "pointer",
+                    color: active ? "#1C3830" : "#9CA3AF",
+                    borderRadius: 9999,
+                    transition: "color 200ms ease-out",
+                    minWidth: 80,
+                  }}>
+                    <Icon size={21} strokeWidth={active ? 2.2 : 1.6} />
+                    <span style={{ fontSize: 10, fontWeight: active ? 650 : 400, letterSpacing: 0.3 }}>{label}</span>
+                  </button>
+                );
+              })}
+            </nav>
+          </div>
+        );
+      })()}
     </div>
   );
 }
