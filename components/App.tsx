@@ -51,6 +51,14 @@ function useSwipeNav(onPrev: (() => void) | null, onNext: (() => void) | null) {
 
 // ── Constants ──────────────────────────────────────────────────────────────
 
+const STATUS_LABEL: Record<JobStatus, string> = {
+  "Want to apply": "Want to apply",
+  "Applied (no response)": "Applied",
+  "Applied (referred)": "Referred",
+  "In progress": "In progress",
+  "Closed": "Closed",
+};
+
 const JOB_STATUSES: JobStatus[] = [
   "Want to apply", "Applied (no response)", "Applied (referred)", "In progress", "Closed",
 ];
@@ -486,7 +494,7 @@ function StatusBadge({ status, chevron, archived }: { status: JobStatus; chevron
   const { bg, text } = STATUS_COLORS[status] ?? STATUS_COLORS["Closed" as JobStatus] ?? { bg: "#F3F4F6", text: "#9CA3AF" };
   return (
     <span style={{ background: bg, color: text, borderRadius: 4, padding: chevron ? "4px 8px 4px 12px" : "4px 10px", fontSize: 11, fontWeight: 500, whiteSpace: "nowrap" as const, display: "inline-flex", alignItems: "center", gap: 4, fontFamily: "ui-monospace, 'SF Mono', Menlo, monospace", letterSpacing: "0.01em", opacity: archived ? 0.45 : 1 }}>
-      {status}
+      {STATUS_LABEL[status] ?? status}
       {chevron && <ChevronDown size={12} strokeWidth={2.5} />}
     </span>
   );
@@ -752,7 +760,7 @@ function AddJobModal({ companies, onClose, onSave }: {
       </Field>
       <Field label="Status">
         <select style={selectStyle} value={form.status} onChange={e => setForm(f => ({ ...f, status: e.target.value as JobStatus }))}>
-          {JOB_STATUSES.map(s => <option key={s}>{s}</option>)}
+          {JOB_STATUSES.map(s => <option key={s} value={s}>{STATUS_LABEL[s] ?? s}</option>)}
         </select>
       </Field>
       <Field label="Notes">
@@ -1521,7 +1529,7 @@ function JobDetailPage({ job, companies, jobs, activities, assets, onBack, onSta
                   }
                 }}
                   style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%", padding: "8px 12px", background: "none", border: "none", cursor: "pointer", borderRadius: 6, fontSize: 13, color: C.text }}>
-                  {s}
+                  {STATUS_LABEL[s] ?? s}
                   {job.status === s && <Check size={13} color={C.green} />}
                 </button>
               ))}
@@ -1851,7 +1859,7 @@ function JobsView({ jobs, activities, onSelect }: {
             return (
               <button key={f} onClick={() => setFilter(f)}
                 style={{ borderRadius: 20, padding: "6px 13px", fontSize: 12, fontWeight: 500, cursor: "pointer", border: "1.5px solid rgba(23,23,26,0.18)", background: active ? "#1C3830" : "transparent", color: active ? "#fff" : "#7A776F", whiteSpace: "nowrap" as const, fontFamily: "ui-monospace, 'SF Mono', Menlo, monospace", flexShrink: 0 }}>
-                {f} · {count}
+                {f === "All" ? "All" : (STATUS_LABEL[f as JobStatus] ?? f)} · {count}
               </button>
             );
           })}
