@@ -1,5 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { DM_Serif_Display } from "next/font/google";
+import { Analytics } from "@vercel/analytics/next";
+import { SpeedInsights } from "@vercel/speed-insights/next";
 import "./globals.css";
 
 const dmSerifDisplay = DM_Serif_Display({ weight: "400", subsets: ["latin"], variable: "--font-dm-serif" });
@@ -22,6 +24,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="en">
       <body className={dmSerifDisplay.variable}>
         {children}
+        <Analytics />
+        <SpeedInsights />
         <script dangerouslySetInnerHTML={{ __html: `
           document.addEventListener('touchstart', function(e) {
             if (e.touches.length > 1) e.preventDefault();
