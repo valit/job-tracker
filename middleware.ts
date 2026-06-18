@@ -2,8 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 const COOKIE = "jobtracker_auth";
 
-async function expectedToken(): Promise<string> {
-  const password = process.env.APP_PASSWORD ?? "";
+async function hashPassword(password: string): Promise<string> {
   const data = new TextEncoder().encode(password + ":jobtracker");
   const hash = await crypto.subtle.digest("SHA-256", data);
   return Array.from(new Uint8Array(hash))
@@ -19,11 +18,18 @@ export async function middleware(req: NextRequest) {
     return NextResponse.next();
   }
 
-  const token = req.cookies.get(COOKIE)?.value;
-  const expected = await expectedToken();
-  const valid = token === expected;
+  const expected = await hashPassword(process.env.APP_PASSWORD ?? "");
 
-  if (valid) return NextResponse.next();
+  // Cookie auth (browser sessions)
+  const token = req.cookies.get(COOKIE)?.value;
+  if (token === expected) return NextResponse.next();
+
+  // Header auth (Chrome extension)
+  const headerPassword = req.headers.get("X-App-Password");
+  if (headerPassword) {
+    const headerToken = await hashPassword(headerPassword);
+    if (headerToken === expected) return NextResponse.next();
+  }
 
   // API routes → 401
   if (pathname.startsWith("/api/")) {
