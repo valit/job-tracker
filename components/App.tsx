@@ -1476,7 +1476,7 @@ function JobDetailPage({ job, companies, jobs, activities, assets, onBack, onSta
     <div ref={swipeRef} style={{ maxWidth: 760, margin: "0 auto", paddingTop: 32 }}>
       {/* Back + prev/next */}
       {(() => {
-        const STATUS_ORDER: JobStatus[] = ["In progress", "Applied (referred)", "Applied (no response)", "Want to apply", "Closed"];
+        const STATUS_ORDER: JobStatus[] = ["Want to apply", "In progress", "Applied (referred)", "Applied (no response)", "Closed"];
         const sortedJobs = STATUS_ORDER.flatMap(status =>
           jobs.filter(j => !j.archived && j.status === status)
               .sort((a, b) => (a.companyName || a.name).localeCompare(b.companyName || b.name))
@@ -1919,7 +1919,7 @@ function JobsView({ jobs, activities, onSelect }: {
       )}
 
       {(() => {
-        const STATUS_ORDER: JobStatus[] = ["In progress", "Applied (referred)", "Applied (no response)", "Want to apply", "Closed"];
+        const STATUS_ORDER: JobStatus[] = ["Want to apply", "In progress", "Applied (referred)", "Applied (no response)", "Closed"];
         const sortKey = (j: Job) => (j.companyName || j.name || "").toLowerCase();
         const groups = STATUS_ORDER
           .map(status => filtered.filter(j => j.status === status).sort((a, b) => sortKey(a).localeCompare(sortKey(b))))
