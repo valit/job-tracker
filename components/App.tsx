@@ -2058,17 +2058,28 @@ function JobDetailPage({ job, companies, jobs, activities, assets, onBack, onSta
 
 // ── Jobs View ──────────────────────────────────────────────────────────────
 
-function JobsView({ jobs, activities, onSelect }: {
+function JobsView({ jobs, activities, onSelect, archivedOpen, setArchivedOpen, scrollToArchived, onAfterScroll }: {
   jobs: Job[]; activities: Activity[];
   onSelect: (j: Job) => void;
+  archivedOpen: boolean; setArchivedOpen: (v: boolean | ((prev: boolean) => boolean)) => void;
+  scrollToArchived?: boolean;
+  onAfterScroll?: () => void;
 }) {
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<JobStatus | "All">("All");
-  const [archivedOpen, setArchivedOpen] = useState(false);
+  const archivedRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (scrollToArchived && archivedOpen && archivedRef.current) {
+      archivedRef.current.scrollIntoView({ behavior: "smooth", block: "start" });
+      onAfterScroll?.();
+    }
+  }, []);
   const isMobile = useIsMobile();
 
   const activeJobs = jobs.filter(j => !j.archived);
-  const archivedJobs = jobs.filter(j => j.archived);
+  const allArchivedJobs = jobs.filter(j => j.archived);
+  const archivedJobs = allArchivedJobs.filter(j => filter === "All" || j.status === filter);
 
   const filtered = activeJobs.filter(j => {
     const q = search.toLowerCase();
@@ -2160,12 +2171,12 @@ function JobsView({ jobs, activities, onSelect }: {
       })()}
 
       {/* Archived disclosure */}
-      {archivedJobs.length > 0 && (
-        <div style={{ marginTop: 12 }}>
+      {allArchivedJobs.length > 0 && (
+        <div ref={archivedRef} style={{ marginTop: 12 }}>
           <button onClick={() => setArchivedOpen(o => !o)}
             style={{ background: "none", border: "none", cursor: "pointer", display: "flex", alignItems: "center", gap: 5, color: C.muted, fontSize: 13, padding: "6px 0" }}>
             {archivedOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-            Archived · {archivedJobs.length}
+            Archived · {archivedJobs.length}{filter !== "All" ? ` of ${allArchivedJobs.length}` : ""}
           </button>
           {archivedOpen && (
             <div style={{ display: "grid", gap: 8, marginTop: 6 }}>
@@ -2662,6 +2673,8 @@ export default function App() {
   const [error, setError] = useState("");
   const [pendingJobId, setPendingJobId] = useState<string | null>(null);
   const [pendingCompanyId, setPendingCompanyId] = useState<string | null>(null);
+  const [archivedOpen, setArchivedOpen] = useState(false);
+  const [scrollToArchived, setScrollToArchived] = useState(false);
 
   useEffect(() => {
     const p = new URLSearchParams(window.location.search);
@@ -2819,12 +2832,12 @@ export default function App() {
         {!loading && !error && (
           <>
             {view === "jobs" && !selectedJob && (
-              <JobsView jobs={jobs} activities={activities} onSelect={setSelectedJob} />
+              <JobsView jobs={jobs} activities={activities} onSelect={setSelectedJob} archivedOpen={archivedOpen} setArchivedOpen={setArchivedOpen} scrollToArchived={scrollToArchived} onAfterScroll={() => setScrollToArchived(false)} />
             )}
             {view === "jobs" && selectedJob && (
               <JobDetailPage
                 job={selectedJob} companies={companies} jobs={jobs} activities={activities} assets={assets}
-                onBack={() => setSelectedJob(null)}
+                onBack={() => { setScrollToArchived(selectedJob?.archived === true); setSelectedJob(null); }}
                 onStatusChange={updateJobStatus}
                 onDelete={id => { setJobs(js => js.filter(j => j.id !== id)); }}
                 onJobUpdate={updated => { setJobs(js => js.map(j => j.id === updated.id ? updated : j)); setSelectedJob(updated); }}
