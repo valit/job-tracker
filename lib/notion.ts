@@ -63,7 +63,9 @@ export interface Activity {
   id: string;
   type: ActivityType;
   date: string;
+  sortOrder: number;
   notes: string;
+  link: string;
   jobId: string;
   jobName: string;
   url: string;
@@ -146,7 +148,9 @@ export function parseActivity(page: any): Activity {
     id: page.id,
     type: (getText(p.Type) as ActivityType) || "Note",
     date: getText(p.Date),
+    sortOrder: p.Order?.number ?? 0,
     notes: getText(p.Notes),
+    link: getText(p.URL),
     jobId: getRelationId(p.Job),
     jobName: "",
     url: page.url,

@@ -11,6 +11,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     if (body.type !== undefined) properties.Type = { select: { name: body.type } };
     if (body.date !== undefined) properties.Date = body.date ? { date: { start: body.date } } : { date: null };
     if (body.jobId !== undefined) properties.Job = body.jobId ? { relation: [{ id: body.jobId }] } : { relation: [] };
+    if (body.link !== undefined) properties.URL = { url: body.link || null };
     const page = await notion.pages.update({ page_id: id, properties });
     return NextResponse.json(parseActivity(page));
   } catch (e: any) {
@@ -21,7 +22,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 export async function DELETE(_: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params;
-    await notion.pages.update({ page_id: id, archived: true });
+    await notion.pages.update({ page_id: id, in_trash: true });
     return NextResponse.json({ ok: true });
   } catch (e: any) {
     return NextResponse.json({ error: e.message }, { status: 500 });

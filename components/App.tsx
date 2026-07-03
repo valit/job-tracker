@@ -220,11 +220,60 @@ const C = {
 
 function formatDate(d: string) {
   if (!d) return "";
-  return new Date(d + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+  const parsed = d.includes("T") ? new Date(d) : new Date(d + "T12:00:00");
+  return parsed.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 }
 
 function today() {
   return new Date().toISOString().split("T")[0];
+}
+
+function nowTime() {
+  const d = new Date();
+  return d.toTimeString().slice(0, 5); // "HH:MM"
+}
+
+function splitDateTime(dt: string): { date: string; time: string } {
+  if (!dt) return { date: today(), time: nowTime() };
+  if (dt.includes("T")) {
+    const [date, timePart] = dt.split("T");
+    const parts = timePart.split(":");
+    return { date, time: `${parts[0] || "00"}:${parts[1] || "00"}` };
+  }
+  if (dt.includes(" ")) {
+    const [date, timePart] = dt.split(" ");
+    const parts = timePart.split(":");
+    return { date, time: `${parts[0] || "00"}:${parts[1] || "00"}` };
+  }
+  return { date: dt, time: "" };
+}
+
+function joinDateTime(date: string, time: string): string {
+  if (!date) return "";
+  if (!time) return date;
+  return `${date}T${time}`;
+}
+
+function TimeSelects({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const [hStr, mStr] = (value || "00:00").split(":");
+  const h = parseInt(hStr) || 0;
+  const m = parseInt(mStr) || 0;
+  const baseStyle: React.CSSProperties = {
+    border: `1px solid ${C.border}`, borderRadius: 8, fontSize: 14,
+    padding: "9px 6px", background: "#fff", color: C.text, outline: "none",
+    cursor: "pointer", appearance: "none" as any, textAlign: "center",
+  };
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+      <select value={h} onChange={e => onChange(`${String(+e.target.value).padStart(2,"0")}:${String(m).padStart(2,"0")}`)} style={{ ...baseStyle, width: 56 }}>
+        {Array.from({ length: 24 }, (_, i) => <option key={i} value={i}>{String(i).padStart(2, "0")}</option>)}
+      </select>
+      <span style={{ fontSize: 14, color: C.muted, fontWeight: 600 }}>:</span>
+      <select value={m} onChange={e => onChange(`${String(h).padStart(2,"0")}:${String(+e.target.value).padStart(2,"0")}`)} style={{ ...baseStyle, width: 56 }}>
+        {Array.from({ length: 60 }, (_, i) => <option key={i} value={i}>{String(i).padStart(2, "0")}</option>)}
+      </select>
+    </div>
+  );
 }
 
 function deriveStatusChange(activityType: ActivityType, currentStatus: JobStatus): JobStatus | null {
@@ -302,6 +351,17 @@ function parseMentions(text: string): Array<{ type: "text" | "mention"; value: s
   return parts;
 }
 
+function getActivityLinkMeta(url: string): { Icon: React.ElementType; label: string } {
+  try {
+    const host = new URL(url).hostname.replace(/^www\./, "");
+    if (host === "mail.google.com") return { Icon: Mail, label: "Read email" };
+    if (host.includes("linkedin.com")) return { Icon: LinkedInIcon, label: "View on LinkedIn" };
+    if (["drive.google.com", "docs.google.com", "sheets.google.com", "slides.google.com"].includes(host))
+      return { Icon: FileText, label: "Open document" };
+  } catch {}
+  return { Icon: ExternalLink, label: "Open link" };
+}
+
 function NotesWithMentions({ notes, allAssets, onOpenAsset }: {
   notes: string;
   allAssets: Asset[];
@@ -329,11 +389,12 @@ function NotesWithMentions({ notes, allAssets, onOpenAsset }: {
   );
 }
 
-function MentionTextarea({ value, onChange, placeholder, assets }: {
+function MentionTextarea({ value, onChange, placeholder, assets, onCreateAsset }: {
   value: string;
   onChange: (v: string) => void;
   placeholder?: string;
   assets: Asset[];
+  onCreateAsset?: (mentionStart: number) => void;
 }) {
   const taRef = useRef<HTMLTextAreaElement>(null);
   const [mentionStart, setMentionStart] = useState<number | null>(null);
@@ -342,6 +403,8 @@ function MentionTextarea({ value, onChange, placeholder, assets }: {
   const [dropdownPos, setDropdownPos] = useState({ top: 0, left: 0, width: 0 });
 
   const filtered = assets.filter(a => a.label.toLowerCase().includes(query.toLowerCase()));
+  // total items = filtered assets + "New asset..." = filtered.length + 1
+  const newAssetIdx = filtered.length;
   const isOpen = mentionStart !== null;
 
   const updateDropdownPos = () => {
@@ -390,10 +453,18 @@ function MentionTextarea({ value, onChange, placeholder, assets }: {
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (!isOpen) return;
-    if (e.key === "ArrowDown") { e.preventDefault(); setSelectedIdx(i => Math.min(i + 1, Math.max(filtered.length - 1, 0))); }
+    const totalItems = filtered.length + (onCreateAsset ? 1 : 0);
+    if (e.key === "ArrowDown") { e.preventDefault(); setSelectedIdx(i => Math.min(i + 1, Math.max(totalItems - 1, 0))); }
     else if (e.key === "ArrowUp") { e.preventDefault(); setSelectedIdx(i => Math.max(i - 1, 0)); }
     else if (e.key === "Enter" || e.key === "Tab") {
-      if (filtered.length > 0) { e.preventDefault(); insertMention(filtered[selectedIdx] ?? filtered[0]); }
+      e.preventDefault();
+      if (selectedIdx === newAssetIdx && onCreateAsset && mentionStart !== null) {
+        const start = mentionStart;
+        setMentionStart(null); setQuery("");
+        onCreateAsset(start);
+      } else if (filtered.length > 0) {
+        insertMention(filtered[selectedIdx] ?? filtered[0]);
+      }
     }
     else if (e.key === "Escape") { e.preventDefault(); setMentionStart(null); setQuery(""); }
   };
@@ -453,13 +524,31 @@ function MentionTextarea({ value, onChange, placeholder, assets }: {
               );
             })
           )}
+          {onCreateAsset && (
+            <>
+              <div style={{ borderTop: `1px solid ${C.border}`, margin: "4px 0" }} />
+              <div
+                onMouseDown={e => {
+                  e.preventDefault();
+                  if (mentionStart === null) return;
+                  const start = mentionStart;
+                  setMentionStart(null); setQuery("");
+                  onCreateAsset(start);
+                }}
+                onMouseEnter={() => setSelectedIdx(newAssetIdx)}
+                style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 14px", cursor: "pointer", background: selectedIdx === newAssetIdx ? C.bg : "#fff", fontSize: 13, color: C.muted }}>
+                <Plus size={13} />
+                <span>New asset…</span>
+              </div>
+            </>
+          )}
         </div>
       )}
     </div>
   );
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+function Field({ label, children }: { label: React.ReactNode; children: React.ReactNode }) {
   return (
     <div style={{ marginBottom: 16 }}>
       <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: C.muted, textTransform: "uppercase", letterSpacing: 0.8, marginBottom: 6 }}>{label}</label>
@@ -854,24 +943,35 @@ const ACTIVITY_PILL_TYPES: { type: ActivityType; label: string }[] = [
   { type: "Note", label: "Note" },
 ];
 
-function EditActivityModal({ activity, onClose, onSave, onDelete, assets = [] }: {
+function EditActivityModal({ activity, onClose, onSave, onDelete, assets = [], companies = [], jobs = [], jobId, onAssetCreated }: {
   activity: Activity; onClose: () => void;
   onSave: (a: Activity) => void;
   onDelete: (id: string) => void;
   assets?: Asset[];
+  companies?: Company[];
+  jobs?: Job[];
+  jobId?: string;
+  onAssetCreated?: (a: Asset) => void;
 }) {
-  const [form, setForm] = useState({ type: activity.type, date: activity.date, notes: activity.notes });
+  const { date: initDate, time: initTime } = splitDateTime(activity.date);
+  const [form, setForm] = useState({ type: activity.type, date: initDate, time: initTime, notes: activity.notes, link: activity.link || "" });
+  const [localAssets, setLocalAssets] = useState<Asset[]>(assets);
   const [saving, setSaving] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [pendingMentionStart, setPendingMentionStart] = useState<number | null>(null);
+  const [showCreateAsset, setShowCreateAsset] = useState(false);
+
+  useEffect(() => { setLocalAssets(assets); }, [assets]);
 
   const save = async () => {
     setSaving(true);
+    const dateValue = joinDateTime(form.date, form.time);
     await fetch(`/api/activities/${activity.id}`, {
       method: "PATCH", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(form),
+      body: JSON.stringify({ ...form, date: dateValue }),
     });
     setSaving(false);
-    onSave({ ...activity, ...form });
+    onSave({ ...activity, ...form, date: dateValue });
     onClose();
   };
 
@@ -881,8 +981,28 @@ function EditActivityModal({ activity, onClose, onSave, onDelete, assets = [] }:
     onClose();
   };
 
-  const isDirty = form.type !== activity.type || form.date !== activity.date || form.notes !== activity.notes;
+  const handleCreateAsset = (mentionStart: number) => {
+    setPendingMentionStart(mentionStart);
+    setShowCreateAsset(true);
+  };
+
+  const handleAssetCreated = (a: Asset) => {
+    setLocalAssets(prev => [...prev, a]);
+    onAssetCreated?.(a);
+    setShowCreateAsset(false);
+    if (pendingMentionStart !== null) {
+      const cur = form.notes.length;
+      const before = form.notes.slice(0, pendingMentionStart);
+      const after = form.notes.slice(cur);
+      const inserted = `@[${a.label}](asset:${a.id}) `;
+      setForm(f => ({ ...f, notes: before + inserted + after }));
+      setPendingMentionStart(null);
+    }
+  };
+
+  const isDirty = form.type !== activity.type || form.date !== initDate || form.time !== initTime || form.notes !== activity.notes || form.link !== (activity.link || "");
   return (
+    <>
     <Modal title="Edit activity" onClose={onClose} isDirty={isDirty}>
       <div style={{ marginBottom: 18 }}>
         <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: C.muted, textTransform: "uppercase" as const, letterSpacing: 0.8, marginBottom: 8 }}>Type</label>
@@ -899,11 +1019,17 @@ function EditActivityModal({ activity, onClose, onSave, onDelete, assets = [] }:
           })}
         </div>
       </div>
-      <Field label="Date">
-        <input style={inputStyle} type="date" value={form.date} onChange={e => setForm(f => ({ ...f, date: e.target.value }))} />
+      <Field label="Date & time">
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <input style={{ ...inputStyle, flex: 2 }} type="date" value={form.date} onChange={e => setForm(f => ({ ...f, date: e.target.value }))} />
+          <TimeSelects value={form.time} onChange={v => setForm(f => ({ ...f, time: v }))} />
+        </div>
+      </Field>
+      <Field label="URL">
+        <input style={inputStyle} type="url" value={form.link} onChange={e => setForm(f => ({ ...f, link: e.target.value }))} placeholder="https://…" onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); save(); } }} />
       </Field>
       <Field label="Notes">
-        <MentionTextarea value={form.notes} onChange={v => setForm(f => ({ ...f, notes: v }))} placeholder="Details, call notes, email content…" assets={assets} />
+        <MentionTextarea value={form.notes} onChange={v => setForm(f => ({ ...f, notes: v }))} placeholder="Details, call notes, email content…" assets={localAssets} onCreateAsset={handleCreateAsset} />
       </Field>
       <div style={{ display: "flex", gap: 10, marginBottom: 16 }}>
         <Btn onClick={save} disabled={saving}>
@@ -923,28 +1049,66 @@ function EditActivityModal({ activity, onClose, onSave, onDelete, assets = [] }:
         </button>
       )}
     </Modal>
+    {showCreateAsset && (
+      <AddAssetModal
+        companies={companies} jobs={jobs} linkTo={{ jobId }}
+        onClose={() => { setShowCreateAsset(false); setPendingMentionStart(null); }}
+        onSave={handleAssetCreated}
+      />
+    )}
+    </>
   );
 }
 
-function AddActivityModal({ jobId, jobName, onClose, onSave, assets = [] }: {
-  jobId: string; jobName: string; onClose: () => void; onSave: (a: Activity) => void; assets?: Asset[];
+function AddActivityModal({ jobId, jobName, onClose, onSave, assets = [], companies = [], jobs = [], onAssetCreated }: {
+  jobId: string; jobName: string; onClose: () => void; onSave: (a: Activity) => void;
+  assets?: Asset[];
+  companies?: Company[];
+  jobs?: Job[];
+  onAssetCreated?: (a: Asset) => void;
 }) {
-  const [form, setForm] = useState({ type: "Note" as ActivityType, date: today(), notes: "" });
+  const [form, setForm] = useState({ type: "Note" as ActivityType, date: today(), time: nowTime(), notes: "", link: "" });
+  const [localAssets, setLocalAssets] = useState<Asset[]>(assets);
   const [saving, setSaving] = useState(false);
+  const [pendingMentionStart, setPendingMentionStart] = useState<number | null>(null);
+  const [showCreateAsset, setShowCreateAsset] = useState(false);
+
+  useEffect(() => { setLocalAssets(assets); }, [assets]);
 
   const save = async () => {
     setSaving(true);
+    const dateValue = joinDateTime(form.date, form.time);
     const res = await fetch("/api/activities", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...form, jobId }),
+      body: JSON.stringify({ ...form, date: dateValue, jobId }),
     });
     const data = await res.json();
     setSaving(false);
     if (!data.error) { onSave({ ...data, jobName }); onClose(); }
   };
 
-  const isDirty = form.notes !== "" || form.type !== "Note" || form.date !== today();
+  const handleCreateAsset = (mentionStart: number) => {
+    setPendingMentionStart(mentionStart);
+    setShowCreateAsset(true);
+  };
+
+  const handleAssetCreated = (a: Asset) => {
+    setLocalAssets(prev => [...prev, a]);
+    onAssetCreated?.(a);
+    setShowCreateAsset(false);
+    if (pendingMentionStart !== null) {
+      const cur = form.notes.length;
+      const before = form.notes.slice(0, pendingMentionStart);
+      const after = form.notes.slice(cur);
+      const inserted = `@[${a.label}](asset:${a.id}) `;
+      setForm(f => ({ ...f, notes: before + inserted + after }));
+      setPendingMentionStart(null);
+    }
+  };
+
+  const isDirty = form.notes !== "" || form.link !== "" || form.type !== "Note" || form.date !== today() || form.time !== nowTime();
   return (
+    <>
     <Modal title="Add activity" onClose={onClose} isDirty={isDirty}>
       <div style={{ fontSize: 13, color: C.muted, marginBottom: 18 }}>For: <strong style={{ color: C.text }}>{jobName}</strong></div>
 
@@ -969,11 +1133,17 @@ function AddActivityModal({ jobId, jobName, onClose, onSave, assets = [] }: {
         </div>
       </div>
 
-      <Field label="Date">
-        <input style={inputStyle} type="date" value={form.date} onChange={e => setForm(f => ({ ...f, date: e.target.value }))} />
+      <Field label="Date & time">
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <input style={{ ...inputStyle, flex: 2 }} type="date" value={form.date} onChange={e => setForm(f => ({ ...f, date: e.target.value }))} />
+          <TimeSelects value={form.time} onChange={v => setForm(f => ({ ...f, time: v }))} />
+        </div>
+      </Field>
+      <Field label="URL">
+        <input style={inputStyle} type="url" value={form.link} onChange={e => setForm(f => ({ ...f, link: e.target.value }))} placeholder="https://…" onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); save(); } }} />
       </Field>
       <Field label="Notes">
-        <MentionTextarea value={form.notes} onChange={v => setForm(f => ({ ...f, notes: v }))} placeholder="Details, call notes, email content…" assets={assets} />
+        <MentionTextarea value={form.notes} onChange={v => setForm(f => ({ ...f, notes: v }))} placeholder="Details, call notes, email content…" assets={localAssets} onCreateAsset={handleCreateAsset} />
       </Field>
       <div style={{ display: "flex", gap: 10 }}>
         <Btn onClick={save} disabled={saving}>
@@ -982,6 +1152,14 @@ function AddActivityModal({ jobId, jobName, onClose, onSave, assets = [] }: {
         <Btn variant="ghost" onClick={onClose}>Cancel</Btn>
       </div>
     </Modal>
+    {showCreateAsset && (
+      <AddAssetModal
+        companies={companies} jobs={jobs} linkTo={{ jobId }}
+        onClose={() => { setShowCreateAsset(false); setPendingMentionStart(null); }}
+        onSave={handleAssetCreated}
+      />
+    )}
+    </>
   );
 }
 
@@ -1425,7 +1603,7 @@ function JobDetailPage({ job, companies, jobs, activities, assets, onBack, onSta
   useEffect(() => {
     setLoadingPanel(true);
     if (MOCK_MODE) {
-      setMyActivities(activities.filter(a => a.jobId === job.id).sort((a, b) => a.date.localeCompare(b.date)));
+      setMyActivities(activities.filter(a => a.jobId === job.id).sort((a, b) => { const d = a.date.localeCompare(b.date); return d !== 0 ? d : a.sortOrder - b.sortOrder; }));
       setMyAssets(assets.filter(a => a.jobId === job.id));
       setLoadingPanel(false);
       return;
@@ -1434,7 +1612,11 @@ function JobDetailPage({ job, companies, jobs, activities, assets, onBack, onSta
       fetch(`/api/activities?jobId=${job.id}`).then(r => r.json()),
       fetch(`/api/assets?jobId=${job.id}`).then(r => r.json()),
     ]).then(([acts, asts]) => {
-      setMyActivities(Array.isArray(acts) ? acts.sort((a: Activity, b: Activity) => a.date.localeCompare(b.date)) : []);
+      setMyActivities(Array.isArray(acts) ? acts.sort((a: Activity, b: Activity) => {
+        const dateCmp = a.date.localeCompare(b.date);
+        if (dateCmp !== 0) return dateCmp;
+        return a.sortOrder - b.sortOrder;
+      }) : []);
       setMyAssets(Array.isArray(asts) ? asts : []);
     }).finally(() => setLoadingPanel(false));
   }, [job.id]);
@@ -1741,6 +1923,16 @@ function JobDetailPage({ job, companies, jobs, activities, assets, onBack, onSta
                         <NotesWithMentions notes={a.notes} allAssets={[...myAssets, ...assets.filter(ast => ast.companyId === job.companyId && !myAssets.find(m => m.id === ast.id))]} onOpenAsset={setEditingAsset} />
                       </div>
                     )}
+                    {a.link && (() => {
+                      const { Icon, label } = getActivityLinkMeta(a.link);
+                      return (
+                        <a href={a.link} target="_blank" rel="noopener noreferrer"
+                          style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 13, color: C.muted, marginTop: 6, textDecoration: "none" }}
+                          onClick={e => e.stopPropagation()}>
+                          <Icon size={13} /> {label}
+                        </a>
+                      );
+                    })()}
                   </div>
                 </div>
               );
@@ -1772,9 +1964,11 @@ function JobDetailPage({ job, companies, jobs, activities, assets, onBack, onSta
         <EditActivityModal
           activity={editingActivity}
           onClose={() => setEditingActivity(null)}
-          onSave={updated => setMyActivities(acts => acts.map(a => a.id === updated.id ? updated : a))}
+          onSave={updated => { setMyActivities(acts => acts.map(a => a.id === updated.id ? updated : a)); setEditingActivity(null); }}
           onDelete={id => setMyActivities(acts => acts.filter(a => a.id !== id))}
           assets={[...myAssets, ...assets.filter(ast => ast.companyId === job.companyId && !myAssets.find(m => m.id === ast.id))]}
+          companies={companies} jobs={jobs} jobId={job.id}
+          onAssetCreated={a => setMyAssets(asts => [...asts, a])}
         />
       )}
 
@@ -1789,9 +1983,11 @@ function JobDetailPage({ job, companies, jobs, activities, assets, onBack, onSta
         <AddActivityModal
           jobId={job.id} jobName={job.name}
           assets={[...myAssets, ...assets.filter(ast => ast.companyId === job.companyId && !myAssets.find(m => m.id === ast.id))]}
+          companies={companies} jobs={jobs}
+          onAssetCreated={a => setMyAssets(asts => [...asts, a])}
           onClose={() => setShowAddActivity(false)}
           onSave={async a => {
-            setMyActivities(acts => [a, ...acts].sort((x, y) => x.date.localeCompare(y.date)));
+            setMyActivities(acts => [a, ...acts].sort((x, y) => { const d = x.date.localeCompare(y.date); return d !== 0 ? d : x.sortOrder - y.sortOrder; }));
             setShowAddActivity(false);
             const newStatus = deriveStatusChange(a.type, job.status);
             if (newStatus) {
@@ -2378,13 +2574,13 @@ const MOCK_JOBS: Job[] = [
 ];
 
 const MOCK_ACTIVITIES: Activity[] = [
-  { id: "ac1", type: "Job created", date: "2026-05-10", notes: "", jobId: "j1", jobName: "Staff Product Designer", url: "" },
-  { id: "ac2", type: "Job created", date: "2026-05-20", notes: "", jobId: "j2", jobName: "Senior UX Designer, Payments", url: "" },
-  { id: "ac3", type: "Job created", date: "2026-06-01", notes: "", jobId: "j3", jobName: "Principal Designer, HI", url: "" },
-  { id: "ac4", type: "Job created", date: "2026-04-15", notes: "", jobId: "j4", jobName: "Design Lead, Growth", url: "" },
-  { id: "a1", type: "Interview", date: "2026-06-05", notes: "First round with hiring manager.", jobId: "j1", jobName: "Staff Product Designer", url: "" },
-  { id: "a2", type: "Application submitted", date: "2026-05-21", notes: "", jobId: "j2", jobName: "Senior UX Designer, Payments", url: "" },
-  { id: "a3", type: "Note", date: "2026-06-10", notes: "Need to follow up on portfolio review.", jobId: "j1", jobName: "Staff Product Designer", url: "" },
+  { id: "ac1", type: "Job created", date: "2026-05-10", sortOrder: 0, notes: "", link: "", jobId: "j1", jobName: "Staff Product Designer", url: "" },
+  { id: "ac2", type: "Job created", date: "2026-05-20", sortOrder: 0, notes: "", link: "", jobId: "j2", jobName: "Senior UX Designer, Payments", url: "" },
+  { id: "ac3", type: "Job created", date: "2026-06-01", sortOrder: 0, notes: "", link: "", jobId: "j3", jobName: "Principal Designer, HI", url: "" },
+  { id: "ac4", type: "Job created", date: "2026-04-15", sortOrder: 0, notes: "", link: "", jobId: "j4", jobName: "Design Lead, Growth", url: "" },
+  { id: "a1", type: "Interview", date: "2026-06-05", sortOrder: 0, notes: "First round with hiring manager.", link: "", jobId: "j1", jobName: "Staff Product Designer", url: "" },
+  { id: "a2", type: "Application submitted", date: "2026-05-21", sortOrder: 0, notes: "", link: "", jobId: "j2", jobName: "Senior UX Designer, Payments", url: "" },
+  { id: "a3", type: "Note", date: "2026-06-10", sortOrder: 0, notes: "Need to follow up on portfolio review.", link: "", jobId: "j1", jobName: "Staff Product Designer", url: "" },
 ];
 
 const MOCK_ASSETS: Asset[] = [

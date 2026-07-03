@@ -30,6 +30,8 @@ export async function POST(req: NextRequest) {
     if (body.type) properties.Type = { select: { name: body.type } };
     if (body.date) properties.Date = { date: { start: body.date } };
     if (body.jobId) properties.Job = { relation: [{ id: body.jobId }] };
+    if (body.link !== undefined) properties.URL = { url: body.link || null };
+    properties.Order = { number: Date.now() };
 
     const page = await notion.pages.create({
       parent: { data_source_id: ACTIVITY_DB } as any,
