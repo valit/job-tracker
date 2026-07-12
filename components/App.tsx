@@ -111,6 +111,7 @@ function useEdgeSwipeBack(onBack: () => void): React.RefObject<HTMLDivElement | 
 // ── Constants ──────────────────────────────────────────────────────────────
 
 const STATUS_LABEL: Record<JobStatus, string> = {
+  "Saved": "Saved",
   "Want to apply": "Want to apply",
   "Applied (no response)": "Applied",
   "Applied (referred)": "Referred",
@@ -119,10 +120,11 @@ const STATUS_LABEL: Record<JobStatus, string> = {
 };
 
 const JOB_STATUSES: JobStatus[] = [
-  "Want to apply", "Applied (no response)", "Applied (referred)", "In progress", "Closed",
+  "Saved", "Want to apply", "Applied (no response)", "Applied (referred)", "In progress", "Closed",
 ];
 
 const STATUS_COLORS: Record<JobStatus, { bg: string; text: string }> = {
+  "Saved":                 { bg: "#DCFCE7", text: "#15803D" },
   "Want to apply":        { bg: "#E5E7EB", text: "#6B7280" },
   "Applied (no response)":{ bg: "#DBEAFE", text: "#1D4ED8" },
   "Applied (referred)":   { bg: "#EDE9FE", text: "#6D28D9" },
@@ -131,6 +133,7 @@ const STATUS_COLORS: Record<JobStatus, { bg: string; text: string }> = {
 };
 
 const STATUS_BORDER: Record<JobStatus, string> = {
+  "Saved":                 "#22C55E",
   "Want to apply":         "#9CA3AF",
   "Applied (no response)": "#3B82F6",
   "Applied (referred)":    "#7C3AED",
@@ -736,7 +739,7 @@ function AddJobModal({ companies, onClose, onSave }: {
 
   const [form, setForm] = useState({
     name: "", companyName: "", companyId: "", isNewCompany: false,
-    status: "Want to apply" as JobStatus, notes: "", domain: "", location: "",
+    status: "Saved" as JobStatus, notes: "", domain: "", location: "",
   });
 
   const handleCompanyInput = (value: string) => {
@@ -755,7 +758,7 @@ function AddJobModal({ companies, onClose, onSave }: {
       companyId: match?.id || "",
       companyName: extracted.company || "",
       isNewCompany: !match && !!extracted.company,
-      status: "Want to apply",
+      status: "Saved",
       notes: extracted.notes || "",
       domain: extracted.domain || "",
       location: extracted.location || "",
@@ -1654,11 +1657,16 @@ function JobDetailPage({ job, companies, jobs, activities, assets, onBack, onSta
     onBack();
   };
 
+  const handleUnarchive = async () => {
+    await fetch(`/api/jobs/${job.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ archived: false }) });
+    onJobUpdate({ ...job, archived: false });
+  };
+
   return (
     <div ref={swipeRef} style={{ maxWidth: 760, margin: "0 auto", paddingTop: 32 }}>
       {/* Back + prev/next */}
       {(() => {
-        const STATUS_ORDER: JobStatus[] = ["Want to apply", "In progress", "Applied (referred)", "Applied (no response)", "Closed"];
+        const STATUS_ORDER: JobStatus[] = ["In progress", "Want to apply", "Saved", "Applied (referred)", "Applied (no response)", "Closed"];
         const sortedJobs = STATUS_ORDER.flatMap(status =>
           jobs.filter(j => !j.archived && j.status === status)
               .sort((a, b) => (a.companyName || a.name).localeCompare(b.companyName || b.name))
@@ -1689,6 +1697,16 @@ function JobDetailPage({ job, companies, jobs, activities, assets, onBack, onSta
           </div>
         );
       })()}
+
+      {/* Archived banner */}
+      {job.archived && (
+        <div style={{ background: "#F3F4F6", border: `1px solid ${C.border}`, borderRadius: 10, padding: "10px 16px", marginBottom: 20, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <span style={{ fontSize: 13, color: "#6B7280", fontWeight: 500 }}>This job is archived</span>
+          <button onClick={handleUnarchive} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 13, color: "#374151", fontWeight: 600, padding: 0, textDecoration: "underline" }}>
+            Unarchive
+          </button>
+        </div>
+      )}
 
       {/* Header */}
       <div style={{ display: "flex", alignItems: "flex-start", gap: 20, marginBottom: 32 }}>
@@ -1944,7 +1962,7 @@ function JobDetailPage({ job, companies, jobs, activities, assets, onBack, onSta
       {/* Archive + Delete */}
       <div style={{ borderTop: `1px solid ${C.border}`, paddingTop: 20, display: "flex", alignItems: "center", gap: 20 }}>
         {job.archived ? (
-          <button onClick={async () => { await fetch(`/api/jobs/${job.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ archived: false }) }); onJobUpdate({ ...job, archived: false }); }}
+          <button onClick={handleUnarchive}
             style={{ background: "none", border: "none", cursor: "pointer", color: C.muted, fontSize: 13, display: "flex", alignItems: "center", gap: 6 }}>
             <Archive size={13} /> Unarchive job
           </button>
@@ -2058,15 +2076,15 @@ function JobDetailPage({ job, companies, jobs, activities, assets, onBack, onSta
 
 // ── Jobs View ──────────────────────────────────────────────────────────────
 
-function JobsView({ jobs, activities, onSelect, archivedOpen, setArchivedOpen, scrollToArchived, onAfterScroll }: {
+function JobsView({ jobs, activities, onSelect, archivedOpen, setArchivedOpen, scrollToArchived, onAfterScroll, filter, setFilter }: {
   jobs: Job[]; activities: Activity[];
   onSelect: (j: Job) => void;
   archivedOpen: boolean; setArchivedOpen: (v: boolean | ((prev: boolean) => boolean)) => void;
   scrollToArchived?: boolean;
   onAfterScroll?: () => void;
+  filter: JobStatus | "All"; setFilter: (f: JobStatus | "All") => void;
 }) {
   const [search, setSearch] = useState("");
-  const [filter, setFilter] = useState<JobStatus | "All">("All");
   const archivedRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -2095,7 +2113,7 @@ function JobsView({ jobs, activities, onSelect, archivedOpen, setArchivedOpen, s
     if (a.type === "Job created") jobCreatedDate[a.jobId] = a.date;
   });
 
-  const FILTERS: (JobStatus | "All")[] = ["All", "Want to apply", "Applied (no response)", "Applied (referred)", "In progress", "Closed"];
+  const FILTERS: (JobStatus | "All")[] = ["All", "In progress", "Want to apply", "Saved", "Applied (referred)", "Applied (no response)", "Closed"];
 
   return (
     <div style={{ maxWidth: isMobile ? "100%" : 760, margin: "0 auto" }}>
@@ -2126,7 +2144,7 @@ function JobsView({ jobs, activities, onSelect, archivedOpen, setArchivedOpen, s
       )}
 
       {(() => {
-        const STATUS_ORDER: JobStatus[] = ["Want to apply", "In progress", "Applied (referred)", "Applied (no response)", "Closed"];
+        const STATUS_ORDER: JobStatus[] = ["In progress", "Want to apply", "Saved", "Applied (referred)", "Applied (no response)", "Closed"];
         const sortKey = (j: Job) => (j.companyName || j.name || "").toLowerCase();
         const groups = STATUS_ORDER
           .map(status => filtered.filter(j => j.status === status).sort((a, b) => sortKey(a).localeCompare(sortKey(b))))
@@ -2251,14 +2269,7 @@ function CompanyDetailPage({ company, companies, jobs, onBack, onUpdate, onDelet
     <div ref={swipeRef} style={{ maxWidth: 760, margin: "0 auto", paddingTop: 32 }}>
       {/* Back + prev/next */}
       {(() => {
-        const openCount = (c: Company) => jobs.filter(j => j.companyId === c.id && !j.archived && j.status !== "Closed").length;
-        const sortedCompanies = [...companies].sort((a, b) => {
-          const oa = openCount(a), ob = openCount(b);
-          if (oa === 0 && ob > 0) return 1;
-          if (ob === 0 && oa > 0) return -1;
-          if (oa !== ob) return ob - oa;
-          return a.name.localeCompare(b.name);
-        });
+        const sortedCompanies = [...companies].sort((a, b) => a.name.localeCompare(b.name));
         const idx = sortedCompanies.findIndex(c => c.id === company.id);
         const total = sortedCompanies.length;
         const pos = idx + 1;
@@ -2322,14 +2333,14 @@ function CompanyDetailPage({ company, companies, jobs, onBack, onUpdate, onDelet
           <div style={{ display: "grid", gap: 8 }}>
             {companyJobs.map(j => (
               <div key={j.id} onClick={() => onSelectJob(j)}
-                style={{ background: "#fff", borderRadius: 10, padding: "14px 18px", border: `1px solid ${C.border}`, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "space-between", transition: "box-shadow .15s" }}
+                style={{ background: "#fff", borderRadius: 10, padding: "14px 18px", border: `1px solid ${C.border}`, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "space-between", transition: "box-shadow .15s", opacity: j.archived ? 0.55 : 1 }}
                 onMouseEnter={e => (e.currentTarget as HTMLDivElement).style.boxShadow = "0 2px 10px rgba(0,0,0,0.06)"}
                 onMouseLeave={e => (e.currentTarget as HTMLDivElement).style.boxShadow = "none"}>
                 <div>
                   <div style={{ fontSize: 14, fontWeight: 600, color: C.text }}>{j.name}</div>
                   {j.location && <div style={{ fontSize: 13, color: C.muted, marginTop: 6 }}>{j.location}</div>}
                 </div>
-                <StatusBadge status={j.status} />
+                <StatusBadge status={j.status} archived={j.archived} />
               </div>
             ))}
           </div>
@@ -2410,16 +2421,10 @@ function CompaniesView({ companies, jobs, onSelect }: {
   const [search, setSearch] = useState("");
   const isMobile = useIsMobile();
 
-  const withCount = companies
-    .map(c => ({ c, openCount: jobs.filter(j => j.companyId === c.id && !j.archived && j.status !== "Closed").length }))
-    .filter(({ c }) => c.name.toLowerCase().includes(search.toLowerCase()));
-
-  const sorted = [...withCount].sort((a, b) => {
-    if (a.openCount === 0 && b.openCount > 0) return 1;
-    if (b.openCount === 0 && a.openCount > 0) return -1;
-    if (b.openCount !== a.openCount) return b.openCount - a.openCount;
-    return a.c.name.localeCompare(b.c.name);
-  });
+  const sorted = companies
+    .filter(c => c.name.toLowerCase().includes(search.toLowerCase()))
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .map(c => ({ c }));
 
   return (
     <div style={{ maxWidth: 760, margin: "0 auto" }}>
@@ -2435,7 +2440,8 @@ function CompaniesView({ companies, jobs, onSelect }: {
       )}
 
       <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 8 }}>
-        {sorted.map(({ c, openCount }) => {
+        {sorted.map(({ c }) => {
+          const openCount = jobs.filter(j => j.companyId === c.id && !j.archived).length;
           const openLabel = openCount === 0 ? "No open jobs" : openCount === 1 ? "1 open job" : `${openCount} open jobs`;
           return (
             <div key={c.id} onClick={() => onSelect(c)}
@@ -2675,6 +2681,7 @@ export default function App() {
   const [pendingCompanyId, setPendingCompanyId] = useState<string | null>(null);
   const [archivedOpen, setArchivedOpen] = useState(false);
   const [scrollToArchived, setScrollToArchived] = useState(false);
+  const [jobsFilter, setJobsFilter] = useState<JobStatus | "All">("All");
 
   useEffect(() => {
     const p = new URLSearchParams(window.location.search);
@@ -2832,7 +2839,7 @@ export default function App() {
         {!loading && !error && (
           <>
             {view === "jobs" && !selectedJob && (
-              <JobsView jobs={jobs} activities={activities} onSelect={setSelectedJob} archivedOpen={archivedOpen} setArchivedOpen={setArchivedOpen} scrollToArchived={scrollToArchived} onAfterScroll={() => setScrollToArchived(false)} />
+              <JobsView jobs={jobs} activities={activities} onSelect={setSelectedJob} archivedOpen={archivedOpen} setArchivedOpen={setArchivedOpen} scrollToArchived={scrollToArchived} onAfterScroll={() => setScrollToArchived(false)} filter={jobsFilter} setFilter={setJobsFilter} />
             )}
             {view === "jobs" && selectedJob && (
               <JobDetailPage

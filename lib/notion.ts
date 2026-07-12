@@ -10,6 +10,7 @@ export const ASSETS_DB = process.env.NOTION_ASSETS_DB!;
 // ── Types ──────────────────────────────────────────────────────────────────
 
 export type JobStatus =
+  | "Saved"
   | "Want to apply"
   | "Applied (no response)"
   | "Applied (referred)"
