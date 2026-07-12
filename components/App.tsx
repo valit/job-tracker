@@ -1700,9 +1700,9 @@ function JobDetailPage({ job, companies, jobs, activities, assets, onBack, onSta
 
       {/* Archived banner */}
       {job.archived && (
-        <div style={{ background: "#F3F4F6", border: `1px solid ${C.border}`, borderRadius: 10, padding: "10px 16px", marginBottom: 20, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <div style={{ background: "rgba(28,56,48,0.09)", border: `1px solid ${C.border}`, borderRadius: 10, padding: "20px 16px", marginBottom: 30, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <span style={{ fontSize: 13, color: "#6B7280", fontWeight: 500 }}>This job is archived</span>
-          <button onClick={handleUnarchive} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 13, color: "#374151", fontWeight: 600, padding: 0, textDecoration: "underline" }}>
+          <button onClick={handleUnarchive} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 13, color: "#374151", fontWeight: 400, padding: 0, textDecoration: "underline" }}>
             Unarchive
           </button>
         </div>
@@ -2241,6 +2241,8 @@ function CompanyDetailPage({ company, companies, jobs, onBack, onUpdate, onDelet
   const [showAddLink, setShowAddLink] = useState(false);
 
   const companyJobs = jobs.filter(j => j.companyId === company.id);
+  const openJobs = companyJobs.filter(j => !j.archived);
+  const archivedJobs = companyJobs.filter(j => j.archived);
 
   const swipeRef = useEdgeSwipeBack(onBack);
 
@@ -2324,28 +2326,49 @@ function CompanyDetailPage({ company, companies, jobs, onBack, onUpdate, onDelet
         </div>
       </div>
 
-      {/* Tracked Jobs */}
+      {/* Open Jobs */}
       <div style={{ marginBottom: 36 }}>
-        <SectionLabel>Jobs{companyJobs.length > 0 ? ` (${companyJobs.length})` : ""}</SectionLabel>
-        {companyJobs.length === 0 ? (
-          <div style={{ fontSize: 13, color: C.muted }}>No jobs tracked for this company.</div>
+        <SectionLabel>Open Jobs{openJobs.length > 0 ? ` (${openJobs.length})` : ""}</SectionLabel>
+        {openJobs.length === 0 ? (
+          <div style={{ fontSize: 13, color: "#aaa" }}>No open jobs</div>
         ) : (
           <div style={{ display: "grid", gap: 8 }}>
-            {companyJobs.map(j => (
+            {openJobs.map(j => (
               <div key={j.id} onClick={() => onSelectJob(j)}
-                style={{ background: "#fff", borderRadius: 10, padding: "14px 18px", border: `1px solid ${C.border}`, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "space-between", transition: "box-shadow .15s", opacity: j.archived ? 0.55 : 1 }}
+                style={{ background: "#fff", borderRadius: 10, padding: "14px 18px", border: `1px solid ${C.border}`, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "space-between", transition: "box-shadow .15s" }}
                 onMouseEnter={e => (e.currentTarget as HTMLDivElement).style.boxShadow = "0 2px 10px rgba(0,0,0,0.06)"}
                 onMouseLeave={e => (e.currentTarget as HTMLDivElement).style.boxShadow = "none"}>
                 <div>
                   <div style={{ fontSize: 14, fontWeight: 600, color: C.text }}>{j.name}</div>
                   {j.location && <div style={{ fontSize: 13, color: C.muted, marginTop: 6 }}>{j.location}</div>}
                 </div>
-                <StatusBadge status={j.status} archived={j.archived} />
+                <StatusBadge status={j.status} />
               </div>
             ))}
           </div>
         )}
       </div>
+
+      {/* Archived Jobs */}
+      {archivedJobs.length > 0 && (
+        <div style={{ marginBottom: 36 }}>
+          <SectionLabel>Archived Jobs ({archivedJobs.length})</SectionLabel>
+          <div style={{ display: "grid", gap: 8 }}>
+            {archivedJobs.map(j => (
+              <div key={j.id} onClick={() => onSelectJob(j)}
+                style={{ background: "#fff", borderRadius: 10, padding: "14px 18px", border: `1px solid ${C.border}`, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "space-between", transition: "box-shadow .15s", opacity: 0.55 }}
+                onMouseEnter={e => (e.currentTarget as HTMLDivElement).style.boxShadow = "0 2px 10px rgba(0,0,0,0.06)"}
+                onMouseLeave={e => (e.currentTarget as HTMLDivElement).style.boxShadow = "none"}>
+                <div>
+                  <div style={{ fontSize: 14, fontWeight: 400, color: C.muted }}>{j.name}</div>
+                  {j.location && <div style={{ fontSize: 13, color: C.muted, marginTop: 6 }}>{j.location}</div>}
+                </div>
+                <StatusBadge status={j.status} archived />
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Links */}
       <div style={{ marginBottom: 36 }}>
@@ -2439,18 +2462,18 @@ function CompaniesView({ companies, jobs, onSelect }: {
         </div>
       )}
 
-      <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 8 }}>
+      <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr 1fr" : "1fr 1fr 1fr", gap: 8 }}>
         {sorted.map(({ c }) => {
           const openCount = jobs.filter(j => j.companyId === c.id && !j.archived).length;
           const openLabel = openCount === 0 ? "No open jobs" : openCount === 1 ? "1 open job" : `${openCount} open jobs`;
           return (
             <div key={c.id} onClick={() => onSelect(c)}
-              style={{ background: "#fff", borderRadius: 12, padding: "18px 20px", cursor: "pointer", border: `1px solid ${C.border}`, transition: "box-shadow .15s", display: "flex", alignItems: "center", gap: 14 }}
+              style={{ background: openCount === 0 ? "#F7F7F7" : "#fff", borderRadius: 12, padding: "24px 16px", cursor: "pointer", border: `1px solid ${C.border}`, transition: "box-shadow .15s", display: "flex", flexDirection: "column", alignItems: "center", gap: 10, textAlign: "center" }}
               onMouseEnter={e => (e.currentTarget as HTMLDivElement).style.boxShadow = "0 2px 14px rgba(0,0,0,0.07)"}
               onMouseLeave={e => (e.currentTarget as HTMLDivElement).style.boxShadow = "none"}>
-              <CompanyLogo name={c.name} logoUrl={c.logoUrl || undefined} size={40} radius={10} />
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 15, fontWeight: 600, color: C.text, marginBottom: 2 }}>{c.name}</div>
+              <CompanyLogo name={c.name} logoUrl={c.logoUrl || undefined} size={52} radius={12} />
+              <div>
+                <div style={{ fontSize: 15, fontWeight: 600, color: C.text, marginBottom: 3 }}>{c.name}</div>
                 <div style={{ fontSize: 13, color: C.muted }}>{openLabel}</div>
               </div>
             </div>
