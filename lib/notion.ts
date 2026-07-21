@@ -2,10 +2,12 @@ import { Client } from "@notionhq/client";
 
 export const notion = new Client({ auth: process.env.NOTION_TOKEN });
 
-export const COMPANIES_DB = process.env.NOTION_COMPANIES_DB!;
-export const JOBS_DB = process.env.NOTION_JOBS_DB!;
-export const ACTIVITY_DB = process.env.NOTION_ACTIVITY_DB!;
-export const ASSETS_DB = process.env.NOTION_ASSETS_DB!;
+const DEMO = process.env.DEMO_MODE === "true";
+
+export const COMPANIES_DB = DEMO ? "0d0a02d8-ef70-4808-bc2e-2cc02849c0b1" : process.env.NOTION_COMPANIES_DB!;
+export const JOBS_DB      = DEMO ? "d5c67517-4ab0-473c-b1d0-66c01f7b7b6b" : process.env.NOTION_JOBS_DB!;
+export const ACTIVITY_DB  = DEMO ? "5f45d7af-1d73-4fba-af2c-eb041abf4df5" : process.env.NOTION_ACTIVITY_DB!;
+export const ASSETS_DB    = DEMO ? "6345f517-931e-4dd7-a4c9-c7efb76c6307" : process.env.NOTION_ASSETS_DB!;
 
 // ── Types ──────────────────────────────────────────────────────────────────
 

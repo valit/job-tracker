@@ -124,21 +124,21 @@ const JOB_STATUSES: JobStatus[] = [
 ];
 
 const STATUS_COLORS: Record<JobStatus, { bg: string; text: string }> = {
-  "Saved":                 { bg: "#DCFCE7", text: "#15803D" },
-  "Want to apply":        { bg: "#E5E7EB", text: "#6B7280" },
-  "Applied (no response)":{ bg: "#DBEAFE", text: "#1D4ED8" },
-  "Applied (referred)":   { bg: "#EDE9FE", text: "#6D28D9" },
-  "In progress":          { bg: "#F5EAD5", text: "#7A5228" },
-  "Closed":               { bg: "#F3F4F6", text: "#9CA3AF" },
+  "Saved":                 { bg: "#BF1DD21A", text: "#BF1DD2" },
+  "Want to apply":         { bg: "#D17D1D1A", text: "#D17D1D" },
+  "Applied (no response)": { bg: "#597C3A1A", text: "#597C3A" },
+  "Applied (referred)":    { bg: "#73D21E1A", text: "#73D21E" },
+  "In progress":           { bg: "#1C9ED01A", text: "#1C9ED0" },
+  "Closed":                { bg: "#5144341A", text: "#514434" },
 };
 
 const STATUS_BORDER: Record<JobStatus, string> = {
-  "Saved":                 "#22C55E",
-  "Want to apply":         "#9CA3AF",
-  "Applied (no response)": "#3B82F6",
-  "Applied (referred)":    "#7C3AED",
-  "In progress":           "#D97706",
-  "Closed":                "#D1D5DB",
+  "Saved":                 "#BF1DD2",
+  "Want to apply":         "#D17D1D",
+  "Applied (no response)": "#597C3A",
+  "Applied (referred)":    "#73D21E",
+  "In progress":           "#1C9ED0",
+  "Closed":                "#514434",
 };
 
 const ACTIVITY_TYPES: ActivityType[] = [
@@ -210,12 +210,12 @@ function getAssetIcon(asset: { type: AssetType; assetUrl?: string }) {
 // ── Design tokens ──────────────────────────────────────────────────────────
 
 const C = {
-  bg: "#F0EDE8",
+  bg: "#F9F9F9",
   surface: "#FFFFFF",
   text: "#1C1917",
   muted: "#78716C",
   border: "#E7E5E0",
-  green: "#1B3A2F",
+  green: "#F55D3E",
   red: "#DC2626",
 };
 
@@ -314,6 +314,7 @@ const KNOWN_DOMAINS: Record<string, string> = {
   "asana": "asana.com", "airtable": "airtable.com", "coda": "coda.io",
   "webflow": "webflow.com", "framer": "framer.com", "loom": "loom.com",
   "miro": "miro.com", "canva": "canva.com", "duolingo": "duolingo.com",
+  "eleven": "elevenmadisonpark.com", "noma": "noma.dk",
 };
 
 function companyDomain(name: string): string {
@@ -1700,7 +1701,7 @@ function JobDetailPage({ job, companies, jobs, activities, assets, onBack, onSta
 
       {/* Archived banner */}
       {job.archived && (
-        <div style={{ background: "rgba(28,56,48,0.09)", border: `1px solid ${C.border}`, borderRadius: 10, padding: "20px 16px", marginBottom: 30, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <div style={{ background: "rgba(245,93,62,0.10)", border: `1px solid ${C.border}`, borderRadius: 10, padding: "20px 16px", marginBottom: 30, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <span style={{ fontSize: 13, color: "#6B7280", fontWeight: 500 }}>This job is archived</span>
           <button onClick={handleUnarchive} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 13, color: "#374151", fontWeight: 400, padding: 0, textDecoration: "underline" }}>
             Unarchive
@@ -2129,7 +2130,7 @@ function JobsView({ jobs, activities, onSelect, archivedOpen, setArchivedOpen, s
             const active = filter === f;
             return (
               <button key={f} onClick={() => setFilter(f)}
-                style={{ borderRadius: 20, padding: "6px 13px", fontSize: 12, fontWeight: 500, cursor: "pointer", border: "1.5px solid rgba(23,23,26,0.18)", background: active ? "#1C3830" : "transparent", color: active ? "#fff" : "#7A776F", whiteSpace: "nowrap" as const, fontFamily: "ui-monospace, 'SF Mono', Menlo, monospace", flexShrink: 0 }}>
+                style={{ borderRadius: 20, padding: "6px 13px", fontSize: 12, fontWeight: 500, cursor: "pointer", border: active ? "1.5px solid #F55D3E" : "1.5px solid rgba(23,23,26,0.18)", background: active ? "#F55D3E" : "transparent", color: active ? "#fff" : "#7A776F", whiteSpace: "nowrap" as const, fontFamily: "ui-monospace, 'SF Mono', Menlo, monospace", flexShrink: 0 }}>
                 {f === "All" ? "All" : (STATUS_LABEL[f as JobStatus] ?? f)} · {count}
               </button>
             );
@@ -2462,16 +2463,16 @@ function CompaniesView({ companies, jobs, onSelect }: {
         </div>
       )}
 
-      <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr 1fr" : "1fr 1fr 1fr", gap: 8 }}>
+      <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr 1fr" : "1fr 1fr 1fr 1fr", gap: 8 }}>
         {sorted.map(({ c }) => {
           const openCount = jobs.filter(j => j.companyId === c.id && !j.archived).length;
           const openLabel = openCount === 0 ? "No open jobs" : openCount === 1 ? "1 open job" : `${openCount} open jobs`;
           return (
             <div key={c.id} onClick={() => onSelect(c)}
-              style={{ background: openCount === 0 ? "#F7F7F7" : "#fff", borderRadius: 12, padding: "24px 16px", cursor: "pointer", border: `1px solid ${C.border}`, transition: "box-shadow .15s", display: "flex", flexDirection: "column", alignItems: "center", gap: 10, textAlign: "center" }}
+              style={{ background: openCount === 0 ? "#F7F7F7" : "#fff", borderRadius: 12, padding: "30px 16px", cursor: "pointer", border: `1px solid ${C.border}`, transition: "box-shadow .15s", display: "flex", flexDirection: "column", alignItems: "center", gap: 24, textAlign: "center" }}
               onMouseEnter={e => (e.currentTarget as HTMLDivElement).style.boxShadow = "0 2px 14px rgba(0,0,0,0.07)"}
               onMouseLeave={e => (e.currentTarget as HTMLDivElement).style.boxShadow = "none"}>
-              <CompanyLogo name={c.name} logoUrl={c.logoUrl || undefined} size={52} radius={12} />
+              <CompanyLogo name={c.name} logoUrl={c.logoUrl || undefined} size={72} radius={14} />
               <div>
                 <div style={{ fontSize: 15, fontWeight: 600, color: C.text, marginBottom: 3 }}>{c.name}</div>
                 <div style={{ fontSize: 13, color: C.muted }}>{openLabel}</div>
@@ -2520,7 +2521,7 @@ function AssetsView({ assets, companies, jobs, onUpdate, onDelete, onNavigateCom
     assets.some(a => {
       const linkedJob = jobs.find(j => j.id === a.jobId);
       return a.companyId === c.id || linkedJob?.companyId === c.id;
-    })
+    })).sort((a, b) => a.name.localeCompare(b.name)
   );
 
   return (
@@ -2529,7 +2530,7 @@ function AssetsView({ assets, companies, jobs, onUpdate, onDelete, onNavigateCom
         <div style={{ display: "flex", gap: 8, overflowX: isMobile ? "auto" : "visible", flexWrap: isMobile ? "nowrap" : "wrap", paddingBottom: isMobile ? 2 : 0 }}>
           {(["All", "URL", "Gmail link", "Document", "Contact"] as const).map(t => (
             <button key={t} onClick={() => setTypeFilter(t as any)}
-              style={{ borderRadius: 20, padding: "7px 16px", fontSize: 12, fontWeight: 500, cursor: "pointer", border: "1.5px solid rgba(23,23,26,0.18)", background: typeFilter === t ? "#1C3830" : "transparent", color: typeFilter === t ? "#fff" : "#7A776F", transition: "all .1s", fontFamily: "ui-monospace, 'SF Mono', Menlo, monospace", flexShrink: 0, whiteSpace: "nowrap" as const }}>
+              style={{ borderRadius: 20, padding: "7px 16px", fontSize: 12, fontWeight: 500, cursor: "pointer", border: typeFilter === t ? "1.5px solid #F55D3E" : "1.5px solid rgba(23,23,26,0.18)", background: typeFilter === t ? "#F55D3E" : "transparent", color: typeFilter === t ? "#fff" : "#7A776F", transition: "all .1s", fontFamily: "ui-monospace, 'SF Mono', Menlo, monospace", flexShrink: 0, whiteSpace: "nowrap" as const }}>
               {ASSET_TYPE_LABELS[t]}
             </button>
           ))}
@@ -2561,22 +2562,30 @@ function AssetsView({ assets, companies, jobs, onUpdate, onDelete, onNavigateCom
           const linkedCompany = companies.find(c => c.id === a.companyId) || (linkedJob ? companies.find(c => c.id === linkedJob.companyId) : undefined);
           return (
             <div key={a.id} onClick={() => setEditingAsset(a)}
-              style={{ background: "#fff", borderRadius: 10, padding: "14px 16px 14px", border: `1px solid ${C.border}`, cursor: "pointer", transition: "box-shadow .15s", display: "flex", flexDirection: "column", gap: 12, overflow: "hidden", minWidth: 0 }}
+              style={{ background: "#fff", borderRadius: 8, border: "1px solid #EAEAEA", cursor: "pointer", transition: "box-shadow .15s", minWidth: 0, overflow: "hidden" }}
               onMouseEnter={e => (e.currentTarget as HTMLDivElement).style.boxShadow = "0 2px 14px rgba(0,0,0,0.07)"}
               onMouseLeave={e => (e.currentTarget as HTMLDivElement).style.boxShadow = "none"}>
-              <div style={{ display: "inline-flex", alignItems: "center", gap: 8, alignSelf: "flex-start" }}>
-                <div style={{ background: ASSET_BG[a.type], color: ASSET_COLORS[a.type], padding: 7, borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center" }}>
-                  <AIcon size={14} />
+              {/* Top zone */}
+              <div style={{ padding: "16px 16px 28px", borderRadius: "8px 8px 0 0" }}>
+                <div style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                  <div style={{ background: ASSET_BG[a.type], color: ASSET_COLORS[a.type], width: 30, height: 30, borderRadius: 7, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                    <AIcon size={14} />
+                  </div>
+                  <span style={{ fontSize: 10, color: "#3A5B7D", fontWeight: 500, fontFamily: "ui-monospace, 'SF Mono', Menlo, monospace" }}>{ASSET_TYPE_LABELS[a.type]}</span>
                 </div>
-                <span style={{ fontSize: 11, color: C.muted, fontWeight: 500, fontFamily: "ui-monospace, 'SF Mono', Menlo, monospace" }}>{ASSET_TYPE_LABELS[a.type]}</span>
               </div>
-              <div style={{ fontSize: 13, fontWeight: 600, color: C.text, lineHeight: 1.4 }}>{displayLabel}</div>
-              {linkedCompany && (
-                <div style={{ display: "flex", alignItems: "center", gap: 7, marginTop: "auto" }}>
-                  <CompanyLogo name={linkedCompany.name} logoUrl={linkedCompany.logoUrl || undefined} size={16} radius={3} noBorder />
-                  <span style={{ fontSize: 11, color: C.muted }}>{linkedCompany.name}</span>
+              {/* Bottom zone */}
+              <div style={{ background: "#F1F1F1", border: "1px solid #EAEAEA", borderTop: "none", borderRadius: "0 0 8px 8px", padding: 16, display: "flex", flexDirection: "column", gap: 13 }}>
+                <div style={{ height: 37, overflow: "hidden" }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, lineHeight: "18.2px", color: "#1A1A1A" }}>{displayLabel}</div>
                 </div>
-              )}
+                {linkedCompany && (
+                  <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                    <CompanyLogo name={linkedCompany.name} logoUrl={linkedCompany.logoUrl || undefined} size={16} radius={3} noBorder />
+                    <span style={{ fontSize: 11, fontWeight: 500, lineHeight: "16.5px", color: "#7A776F" }}>{linkedCompany.name}</span>
+                  </div>
+                )}
+              </div>
             </div>
           );
         })}
@@ -2664,7 +2673,7 @@ function NavTabs({ view, navTo }: { view: View; navTo: (v: View) => void }) {
       {/* sliding pill */}
       <div style={{
         position: "absolute", top: 0, bottom: 0, borderRadius: 8,
-        background: "rgba(28,56,48,0.09)",
+        background: "rgba(245,93,62,0.10)",
         left: pill.left, width: pill.width,
         transition: ready ? "left 200ms ease-out, width 200ms ease-out" : "none",
         pointerEvents: "none",
@@ -2678,7 +2687,7 @@ function NavTabs({ view, navTo }: { view: View; navTo: (v: View) => void }) {
             position: "relative", zIndex: 1,
             padding: "6px 14px", borderRadius: 8, border: "none", cursor: "pointer",
             background: "transparent",
-            color: view === v ? "#1C3830" : "#7A776F",
+            color: view === v ? "#F55D3E" : "#7A776F",
             fontSize: 14, fontWeight: 500,
             transition: "color 200ms ease-out",
             textTransform: "capitalize",
@@ -2819,8 +2828,8 @@ export default function App() {
         <nav style={{ background: C.bg, borderBottom: `1px solid ${C.border}`, position: "sticky", top: 0, zIndex: 800, padding: "0 32px" }}>
           <div style={{ maxWidth: 760, margin: "0 auto", display: "flex", alignItems: "center", height: 56 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 6, marginRight: 28 }}>
-              <svg width="28" height="28" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg"><circle cx="256" cy="256" r="256" fill="#1C3830"/><g transform="translate(256 256)"><g transform="translate(-120 -120) scale(10)" stroke="white" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round"><rect width="20" height="14" x="2" y="7" rx="2" ry="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></g></g></svg>
-              <span style={{ fontFamily: "var(--font-dm-serif), Georgia, serif", fontSize: 21, fontWeight: 400, color: C.text, letterSpacing: -0.5 }}>Job Tracker</span>
+              <svg width="28" height="28" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg"><circle cx="256" cy="256" r="256" fill="#F55D3E"/><g transform="translate(256 256)"><g transform="translate(-120 -120) scale(10)" stroke="white" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round"><rect width="20" height="14" x="2" y="7" rx="2" ry="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></g></g></svg>
+              <span style={{ fontFamily: "var(--font-dm-serif), Georgia, serif", fontSize: 21, fontWeight: 400, color: "#F55D3E", letterSpacing: -0.5 }}>JobSearch</span>
             </div>
             <NavTabs view={view} navTo={navTo} />
             <Btn onClick={newBtnAction} style={{ padding: "7px 16px", fontSize: 13 }}>
@@ -2834,8 +2843,8 @@ export default function App() {
       {isMobile && (
         <div style={{ background: C.bg, borderBottom: `1px solid ${C.border}`, position: "sticky", top: 0, zIndex: 800, padding: "0 16px", display: "flex", alignItems: "center", justifyContent: "space-between", height: 52 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-            <svg width="28" height="28" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg"><circle cx="256" cy="256" r="256" fill="#1C3830"/><g transform="translate(256 256)"><g transform="translate(-120 -120) scale(10)" stroke="white" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round"><rect width="20" height="14" x="2" y="7" rx="2" ry="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></g></g></svg>
-            <span style={{ fontFamily: "var(--font-dm-serif), Georgia, serif", fontSize: 22, fontWeight: 400, color: C.text, letterSpacing: -0.5 }}>Job Tracker</span>
+            <svg width="28" height="28" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg"><circle cx="256" cy="256" r="256" fill="#F55D3E"/><g transform="translate(256 256)"><g transform="translate(-120 -120) scale(10)" stroke="white" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round"><rect width="20" height="14" x="2" y="7" rx="2" ry="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></g></g></svg>
+            <span style={{ fontFamily: "var(--font-dm-serif), Georgia, serif", fontSize: 22, fontWeight: 400, color: C.text, letterSpacing: -0.5 }}>JobSearch</span>
           </div>
           <button onClick={newBtnAction} style={{ background: C.green, color: "#fff", border: "none", borderRadius: 8, padding: "7px 12px", fontSize: 13, fontWeight: 500, cursor: "pointer", display: "flex", alignItems: "center", gap: 5 }}>
             <Plus size={14} /> {newBtnLabel}
@@ -2965,7 +2974,7 @@ export default function App() {
                     gap: isNavCompact ? 0 : 3,
                     padding: isNavCompact ? "10px 22px" : "10px 28px",
                     background: "none", border: "none", cursor: "pointer",
-                    color: active ? "#1C3830" : "#9CA3AF",
+                    color: active ? "#F55D3E" : "#9CA3AF",
                     borderRadius: 9999,
                     transition: "color 200ms ease-out, padding 200ms ease-out, gap 200ms ease-out",
                     minWidth: isNavCompact ? 60 : 80,
