@@ -17,6 +17,16 @@ export const metadata: Metadata = {
   title: "Job Tracker",
   description: "Track your job search",
   robots: { index: false, follow: false },
+  icons: {
+    icon: [
+      { url: "/favicon.ico", rel: "shortcut icon" },
+      { url: "/favicon-96x96.png", sizes: "96x96", type: "image/png" },
+      { url: "/favicon.svg", type: "image/svg+xml" },
+    ],
+    apple: { url: "/apple-touch-icon.png", sizes: "180x180" },
+  },
+  appleWebApp: { title: "Job Tracker" },
+  manifest: "/site.webmanifest",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
