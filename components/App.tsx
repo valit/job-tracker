@@ -156,6 +156,7 @@ const ACTIVITY_ICONS: Record<ActivityType, any> = {
   "Referral submitted": ArrowUpRight,
   "Note": MessageSquare,
   "Job created": FilePlus,
+  "Status changed": ArrowUpRight,
 };
 
 const ACTIVITY_COLORS: Record<ActivityType, string> = {
@@ -168,6 +169,7 @@ const ACTIVITY_COLORS: Record<ActivityType, string> = {
   "Referral submitted": "#F97316",
   "Note": "#9CA3AF",
   "Job created": "#9CA3AF",
+  "Status changed": "#9CA3AF",
 };
 
 const ASSET_ICONS: Record<AssetType, any> = {
@@ -315,6 +317,11 @@ const KNOWN_DOMAINS: Record<string, string> = {
   "webflow": "webflow.com", "framer": "framer.com", "loom": "loom.com",
   "miro": "miro.com", "canva": "canva.com", "duolingo": "duolingo.com",
   "eleven": "elevenmadisonpark.com", "noma": "noma.dk",
+};
+
+const KNOWN_LOGO_URLS: Record<string, string> = {
+  "le bernardin": "https://le-bernardin.com/dist/logo.png",
+  "french laundry": "https://thomaskeller.com/sites/all/themes/thomaskeller/images/logos/the-french-laundry.svg",
 };
 
 function companyDomain(name: string): string {
@@ -660,9 +667,17 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
   );
 }
 
+function companyLogoKey(name: string): string {
+  return (name || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, "")
+    .replace(/\b(inc|llc|corp|ltd|co|the)\b/g, "")
+    .trim();
+}
+
 function CompanyLogo({ name, domain: domainOverride, logoUrl, size = 40, radius = 10, noBorder }: { name: string; domain?: string; logoUrl?: string; size?: number; radius?: number; noBorder?: boolean }) {
   const domain = domainOverride || companyDomain(name);
-  const primary = logoUrl || `https://www.google.com/s2/favicons?domain=${domain}&sz=128`;
+  const primary = logoUrl || KNOWN_LOGO_URLS[companyLogoKey(name)] || `https://www.google.com/s2/favicons?domain=${domain}&sz=128`;
   const [src, setSrc] = useState(primary);
   const [err, setErr] = useState(false);
   useEffect(() => { setSrc(primary); setErr(false); }, [primary]);
@@ -1573,7 +1588,7 @@ function EditAssetModal({ asset, companies, jobs, onClose, onSave, onDelete, onN
 function JobDetailPage({ job, companies, jobs, activities, assets, onBack, onStatusChange, onDelete, onJobUpdate, onNavigateCompany, onNavigateJob }: {
   job: Job; companies: Company[]; jobs: Job[]; activities: Activity[]; assets: Asset[];
   onBack: () => void;
-  onStatusChange: (id: string, s: JobStatus) => void;
+  onStatusChange: (id: string, s: JobStatus) => Promise<void>;
   onDelete: (id: string) => void;
   onJobUpdate: (updated: Job) => void;
   onNavigateCompany?: (c: Company) => void;
@@ -1767,12 +1782,21 @@ function JobDetailPage({ job, companies, jobs, activities, assets, onBack, onSta
           {statusDropdown && (
             <div style={{ position: "absolute", right: 0, top: "calc(100% + 6px)", background: "#fff", borderRadius: 10, border: `1px solid ${C.border}`, boxShadow: "0 4px 16px rgba(0,0,0,0.1)", zIndex: 200, minWidth: 210, padding: 6 }}>
               {JOB_STATUSES.map(s => (
-                <button key={s} onClick={() => {
+                <button key={s} onClick={async () => {
                   setStatusDropdown(false);
                   if (job.archived && s !== "Closed") {
                     setPendingStatus(s);
                   } else {
-                    onStatusChange(job.id, s);
+                    const prev = job.status;
+                    await onStatusChange(job.id, s);
+                    if (prev !== s) {
+                      const label = (st: JobStatus) => STATUS_LABEL[st] ?? st;
+                      const actData = await fetch("/api/activities", {
+                        method: "POST", headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ type: "Status changed", date: today(), notes: `Status changed from ${label(prev)} to ${label(s)}`, jobId: job.id }),
+                      }).then(r => r.json());
+                      if (!actData.error) setMyActivities(acts => [...acts, { ...actData, jobName: job.name }].sort((a, b) => { const d = a.date.localeCompare(b.date); return d !== 0 ? d : a.sortOrder - b.sortOrder; }));
+                    }
                   }
                 }}
                   style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%", padding: "8px 12px", background: "none", border: "none", cursor: "pointer", borderRadius: 6, fontSize: 13, color: C.text }}>
@@ -1793,10 +1817,17 @@ function JobDetailPage({ job, companies, jobs, activities, assets, onBack, onSta
             <Btn variant="ghost" onClick={() => setPendingStatus(null)} style={{ padding: "6px 14px", fontSize: 13 }}>Cancel</Btn>
             <Btn onClick={async () => {
               const s = pendingStatus;
+              const prev = job.status;
               setPendingStatus(null);
               await fetch(`/api/jobs/${job.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ archived: false, status: s }) });
               onJobUpdate({ ...job, archived: false, status: s });
-              onStatusChange(job.id, s);
+              await onStatusChange(job.id, s);
+              const label = (st: JobStatus) => STATUS_LABEL[st] ?? st;
+              const actData = await fetch("/api/activities", {
+                method: "POST", headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ type: "Status changed", date: today(), notes: `Unarchived and status changed from ${label(prev)} to ${label(s)}`, jobId: job.id }),
+              }).then(r => r.json());
+              if (!actData.error) setMyActivities(acts => [...acts, { ...actData, jobName: job.name }].sort((a, b) => { const d = a.date.localeCompare(b.date); return d !== 0 ? d : a.sortOrder - b.sortOrder; }));
             }} style={{ padding: "6px 14px", fontSize: 13 }}>Unarchive + apply</Btn>
           </div>
         </div>

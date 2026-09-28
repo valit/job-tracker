@@ -28,7 +28,8 @@ export type ActivityType =
   | "Interview"
   | "Referral submitted"
   | "Note"
-  | "Job created";
+  | "Job created"
+  | "Status changed";
 
 export type AssetType = "URL" | "Gmail link" | "Document" | "Contact";
 export type PersonTitle = "Recruiter" | "Hiring Manager" | "Interviewer" | "Referral" | "Connection";
