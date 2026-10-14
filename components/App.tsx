@@ -381,7 +381,7 @@ function NotesWithMentions({ notes, allAssets, onOpenAsset }: {
   if (!notes) return null;
   const parts = parseMentions(notes);
   return (
-    <span>
+    <span style={{ whiteSpace: "pre-wrap" }}>
       {parts.map((p, i) => {
         if (p.type === "text") return <span key={i}>{p.value}</span>;
         const asset = allAssets.find(a => a.id === p.assetId);
@@ -1476,7 +1476,7 @@ function EditAssetModal({ asset, companies, jobs, onClose, onSave, onDelete, onN
               {asset.personEmail && <a href={`mailto:${asset.personEmail}`} style={{ color: "#2563EB", textDecoration: "none", display: "flex", alignItems: "center", gap: 6 }}><Mail size={14} />{asset.personEmail}</a>}
               {asset.personPhone && <a href={`tel:${asset.personPhone}`} style={{ color: "#2563EB", textDecoration: "none", display: "flex", alignItems: "center", gap: 6 }}><Phone size={14} />{asset.personPhone}</a>}
               {asset.personLinkedin && <a href={asset.personLinkedin} target="_blank" rel="noreferrer" style={{ color: "#2563EB", textDecoration: "none", display: "flex", alignItems: "center", gap: 6 }}><ExternalLink size={14} />LinkedIn</a>}
-              {asset.personNotes && <p style={{ color: C.text, margin: 0, lineHeight: 1.6 }}>{asset.personNotes}</p>}
+              {asset.personNotes && <p style={{ color: C.text, margin: 0, lineHeight: 1.6, whiteSpace: "pre-wrap" }}>{asset.personNotes}</p>}
             </div>
           )}
 
@@ -1871,7 +1871,7 @@ function JobDetailPage({ job, companies, jobs, activities, assets, onBack, onSta
               onMouseEnter={() => setNotesHovered(true)}
               onMouseLeave={() => setNotesHovered(false)}
               onClick={() => setEditNotes(true)}
-              style={{ fontSize: 14, color: C.text, lineHeight: 1.7, cursor: "text" }}>
+              style={{ fontSize: 14, color: C.text, lineHeight: 1.7, cursor: "text", whiteSpace: "pre-wrap" }}>
               {job.notes}
             </div>
           )}
