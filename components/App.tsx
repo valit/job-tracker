@@ -2264,7 +2264,7 @@ function JobsView({ jobs, activities, onSelect, archivedOpen, setArchivedOpen, s
       <div style={{ display: "flex", flexDirection: isMobile ? "column" : "row", alignItems: isMobile ? "stretch" : "flex-start", gap: 10, marginBottom: 20 }}>
         <div style={{ position: "relative" }}>
           <Search size={14} style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", color: C.muted }} />
-          <input style={{ ...inputStyle, paddingLeft: 34, width: "100%" }} placeholder="Search jobs…" value={search} onChange={e => setSearch(e.target.value)} />
+          <input style={{ ...inputStyle, padding: "6px 12px", paddingLeft: 34, width: "100%" }} placeholder="Search jobs…" value={search} onChange={e => setSearch(e.target.value)} />
         </div>
         <div style={{ display: "flex", gap: 7, alignItems: "center", overflowX: isMobile ? "auto" : "visible", flexWrap: isMobile ? "nowrap" : "wrap", paddingBottom: isMobile ? 2 : 0, minWidth: 0, width: isMobile ? "100%" : undefined }}>
           {FILTERS.map(f => {
@@ -2709,7 +2709,7 @@ function AssetsView({ assets, companies, jobs, onUpdate, onDelete, onNavigateCom
 
   return (
     <div style={{ maxWidth: isMobile ? "100%" : 760, margin: "0 auto" }}>
-      <div style={{ display: "flex", flexDirection: isMobile ? "column" : "row", alignItems: isMobile ? "stretch" : "center", justifyContent: "space-between", gap: 10, marginBottom: 20 }}>
+      <div style={{ display: "flex", flexDirection: isMobile ? "column" : "row", alignItems: isMobile ? "stretch" : "flex-start", justifyContent: "space-between", gap: 10, marginBottom: 20 }}>
         <div style={{ display: "flex", gap: 8, overflowX: isMobile ? "auto" : "visible", flexWrap: isMobile ? "nowrap" : "wrap", paddingBottom: isMobile ? 2 : 0 }}>
           {(["All", "URL", "Gmail link", "Document", "Contact"] as const).map(t => (
             <button key={t} onClick={() => setTypeFilter(t as any)}
