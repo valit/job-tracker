@@ -2567,33 +2567,87 @@ function CompanyDetailPage({ company, companies, jobs, onBack, onUpdate, onDelet
 
 // ── Companies View ─────────────────────────────────────────────────────────
 
-function CompaniesView({ companies, jobs, onSelect }: {
-  companies: Company[]; jobs: Job[];
+function CompaniesView({ companies, jobs, activities, onSelect }: {
+  companies: Company[]; jobs: Job[]; activities: Activity[];
   onSelect: (c: Company) => void;
 }) {
   const [search, setSearch] = useState("");
+  const [openJobsOnly, setOpenJobsOnly] = useState(false);
+  const [timePills, setTimePills] = useState<Set<TimeBucket>>(new Set());
   const isMobile = useIsMobile();
 
-  const sorted = companies
-    .filter(c => c.name.toLowerCase().includes(search.toLowerCase()))
-    .sort((a, b) => a.name.localeCompare(b.name))
-    .map(c => ({ c }));
+  // Latest activity date per company: best latestJobActivityDate across ALL jobs
+  // (including archived/closed), so the time pills reflect actual engagement.
+  const companyLatestDate: Record<string, string> = {};
+  for (const c of companies) {
+    let best = "";
+    for (const j of jobs) {
+      if (j.companyId !== c.id) continue;
+      const d = latestJobActivityDate(j.id, j.createdAt, activities);
+      if (!best || d > best) best = d;
+    }
+    if (best) companyLatestDate[c.id] = best;
+  }
+
+  const hasFilters = openJobsOnly || timePills.size > 0 || search !== "";
+  const clearFilters = () => { setOpenJobsOnly(false); setTimePills(new Set()); setSearch(""); };
+
+  const filtered = companies.filter(c => {
+    if (search && !c.name.toLowerCase().includes(search.toLowerCase())) return false;
+    if (openJobsOnly && !jobs.some(j => j.companyId === c.id && !j.archived)) return false;
+    if (timePills.size > 0) {
+      const d = companyLatestDate[c.id];
+      if (!d || !timePills.has(timeBucket(d))) return false;
+    }
+    return true;
+  }).sort((a, b) => a.name.localeCompare(b.name));
+
+  const pillStyle = (active: boolean): React.CSSProperties => ({
+    borderRadius: 20, padding: "6px 13px", fontSize: 12, fontWeight: 500,
+    cursor: "pointer",
+    border: active ? `1.5px solid ${C.green}` : "1.5px solid rgba(23,23,26,0.18)",
+    background: active ? C.green : "transparent",
+    color: active ? "#fff" : "#7A776F",
+    whiteSpace: "nowrap",
+    fontFamily: "ui-monospace, 'SF Mono', Menlo, monospace",
+    flexShrink: 0,
+  });
 
   return (
     <div style={{ maxWidth: 760, margin: "0 auto" }}>
-      <div style={{ position: "relative", marginBottom: 20, maxWidth: 280 }}>
-        <Search size={14} style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", color: C.muted }} />
-        <input style={{ ...inputStyle, paddingLeft: 34 }} placeholder="Search companies…" value={search} onChange={e => setSearch(e.target.value)} />
+      <div style={{ display: "flex", flexDirection: isMobile ? "column" : "row", alignItems: isMobile ? "stretch" : "flex-start", gap: 10, marginBottom: 20 }}>
+        <div style={{ position: "relative" }}>
+          <Search size={14} style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", color: C.muted }} />
+          <input style={{ ...inputStyle, padding: "6px 12px", paddingLeft: 34, width: "100%" }} placeholder="Search companies…" value={search} onChange={e => setSearch(e.target.value)} />
+        </div>
+        <div style={{ display: "flex", gap: 7, alignItems: "center", flexWrap: "wrap" }}>
+          <button onClick={() => setOpenJobsOnly(v => !v)} style={pillStyle(openJobsOnly)}>Open jobs</button>
+          {!isMobile && <div style={{ width: 1, height: 20, background: C.border, alignSelf: "center", flexShrink: 0 }} />}
+          {TIME_SECTION_ORDER.map(bucket => (
+            <button key={bucket} onClick={() => setTimePills(prev => { const next = new Set(prev); next.has(bucket) ? next.delete(bucket) : next.add(bucket); return next; })} style={pillStyle(timePills.has(bucket))}>
+              {TIME_SECTION_LABEL[bucket]}
+            </button>
+          ))}
+        </div>
       </div>
 
-      {sorted.length === 0 && (
+      {filtered.length === 0 && (
         <div style={{ background: "#fff", borderRadius: 12, padding: 48, textAlign: "center", color: C.muted, fontSize: 14 }}>
-          {companies.length === 0 ? "No companies yet. Add your first one." : "No matches."}
+          {companies.length === 0 ? "No companies yet. Add your first one." : (
+            <>
+              No companies match these filters.{" "}
+              {hasFilters && (
+                <button onClick={clearFilters} style={{ background: "none", border: "none", color: C.green, cursor: "pointer", fontSize: 14, padding: 0, textDecoration: "underline" }}>
+                  Clear filters
+                </button>
+              )}
+            </>
+          )}
         </div>
       )}
 
       <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr 1fr" : "1fr 1fr 1fr 1fr", gap: 8 }}>
-        {sorted.map(({ c }) => {
+        {filtered.map(c => {
           const openCount = jobs.filter(j => j.companyId === c.id && !j.archived).length;
           const openLabel = openCount === 0 ? "No open jobs" : openCount === 1 ? "1 open job" : `${openCount} open jobs`;
           return (
@@ -3014,7 +3068,7 @@ export default function App() {
               />
             )}
             {view === "companies" && !selectedCompany && (
-              <CompaniesView companies={companies} jobs={jobs} onSelect={setSelectedCompany} />
+              <CompaniesView companies={companies} jobs={jobs} activities={activities} onSelect={setSelectedCompany} />
             )}
             {view === "companies" && selectedCompany && (
               <CompanyDetailPage
