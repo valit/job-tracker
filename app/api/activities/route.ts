@@ -6,15 +6,22 @@ export async function GET(req: NextRequest) {
     const { searchParams } = new URL(req.url);
     const jobId = searchParams.get("jobId");
 
-    const queryParams: any = {
-      data_source_id: ACTIVITY_DB,
-    };
+    const queryParams: any = { data_source_id: ACTIVITY_DB };
     if (jobId) {
       queryParams.filter = { property: "Job", relation: { contains: jobId } };
     }
 
-    const response = await notion.dataSources.query(queryParams);
-    return NextResponse.json((response as any).results.map(parseActivity));
+    let results: any[] = [];
+    let cursor: string | undefined;
+    do {
+      const response: any = await notion.dataSources.query(
+        cursor ? { ...queryParams, start_cursor: cursor } : queryParams,
+      );
+      results = results.concat(response.results);
+      cursor = response.has_more ? response.next_cursor : undefined;
+    } while (cursor);
+
+    return NextResponse.json(results.map(parseActivity));
   } catch (e: any) {
     return NextResponse.json({ error: e.message }, { status: 500 });
   }
