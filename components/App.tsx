@@ -2106,6 +2106,67 @@ function JobDetailPage({ job, companies, jobs, activities, assets, onBack, onSta
   );
 }
 
+// ── Latest-activity date helper ───────────────────────────────────────────
+//
+// Returns the most recent "counted" activity date for a job, falling back to
+// the job's createdAt date.  Excluded (do NOT count as activity):
+//   • A "Status changed" entry whose new status is "Closed"
+//     (identified by notes ending with the EXCLUDED_CLOSING_SUFFIX constant)
+// Archive/unarchive do not generate activity entries, so nothing else to exclude.
+// Cap future dates to today so they don't distort recency bucketing.
+
+const EXCLUDED_CLOSING_SUFFIX = " to Closed";
+
+function isExcludedActivity(a: Activity): boolean {
+  if (a.type !== "Status changed") return false;
+  return a.notes.endsWith(EXCLUDED_CLOSING_SUFFIX);
+}
+
+function latestJobActivityDate(
+  jobId: string,
+  jobCreatedAt: string,
+  activities: Activity[],
+): string {
+  const todayStr = today();
+  let best = "";
+  for (const a of activities) {
+    if (a.jobId !== jobId) continue;
+    if (isExcludedActivity(a)) continue;
+    const raw = a.date.slice(0, 10); // normalize: strip time/timezone if present
+    const d = raw > todayStr ? todayStr : raw;
+    if (!best || d > best) best = d;
+  }
+  if (!best) {
+    // Fall back to job created date, capped to today
+    const created = jobCreatedAt ? jobCreatedAt.slice(0, 10) : todayStr;
+    best = created > todayStr ? todayStr : created;
+  }
+  return best;
+}
+
+function daysSince(dateStr: string): number {
+  const todayMs = new Date(today() + "T12:00:00").getTime();
+  const d = new Date(dateStr + "T12:00:00").getTime();
+  return Math.floor((todayMs - d) / 86400000);
+}
+
+type TimeBucket = "last30" | "31to90" | "older";
+
+function timeBucket(dateStr: string): TimeBucket {
+  const days = daysSince(dateStr);
+  if (days <= 30) return "last30";
+  if (days <= 90) return "31to90";
+  return "older";
+}
+
+const TIME_SECTION_LABEL: Record<TimeBucket, string> = {
+  last30: "Last 30 days",
+  "31to90": "31–90 days",
+  older: "Older than 90 days",
+};
+
+const TIME_SECTION_ORDER: TimeBucket[] = ["last30", "31to90", "older"];
+
 // ── Jobs View ──────────────────────────────────────────────────────────────
 
 function JobsView({ jobs, activities, onSelect, archivedOpen, setArchivedOpen, scrollToArchived, onAfterScroll, filter, setFilter }: {
@@ -2118,6 +2179,19 @@ function JobsView({ jobs, activities, onSelect, archivedOpen, setArchivedOpen, s
 }) {
   const [search, setSearch] = useState("");
   const archivedRef = useRef<HTMLDivElement>(null);
+  // Per-section open state, persisted in localStorage
+  const [sectionOpen, setSectionOpen] = useState<Record<TimeBucket, boolean>>(() => {
+    try {
+      const saved = localStorage.getItem("jobsTimeSectionOpen");
+      if (saved) return JSON.parse(saved);
+    } catch {}
+    return { last30: true, "31to90": true, older: true };
+  });
+  const toggleSection = (b: TimeBucket) => setSectionOpen(prev => {
+    const next = { ...prev, [b]: !prev[b] };
+    try { localStorage.setItem("jobsTimeSectionOpen", JSON.stringify(next)); } catch {}
+    return next;
+  });
 
   useEffect(() => {
     if (scrollToArchived && archivedOpen && archivedRef.current) {
@@ -2129,7 +2203,15 @@ function JobsView({ jobs, activities, onSelect, archivedOpen, setArchivedOpen, s
 
   const activeJobs = jobs.filter(j => !j.archived);
   const allArchivedJobs = jobs.filter(j => j.archived);
-  const archivedJobs = allArchivedJobs.filter(j => filter === "All" || j.status === filter);
+  const archivedJobs = allArchivedJobs.filter(j => {
+    if (filter !== "All" && j.status !== filter) return false;
+    const q = search.toLowerCase();
+    return !q || j.name.toLowerCase().includes(q) || j.companyName.toLowerCase().includes(q);
+  });
+
+  // Build latest-activity date per job (with exclusion rule applied)
+  const latestDate: Record<string, string> = {};
+  activeJobs.forEach(j => { latestDate[j.id] = latestJobActivityDate(j.id, j.createdAt, activities); });
 
   const filtered = activeJobs.filter(j => {
     const q = search.toLowerCase();
@@ -2138,14 +2220,43 @@ function JobsView({ jobs, activities, onSelect, archivedOpen, setArchivedOpen, s
     return true;
   });
 
-  const lastActivity: Record<string, string> = {};
-  const jobCreatedDate: Record<string, string> = {};
-  activities.forEach(a => {
-    if (!lastActivity[a.jobId] || a.date > lastActivity[a.jobId]) lastActivity[a.jobId] = a.date;
-    if (a.type === "Job created") jobCreatedDate[a.jobId] = a.date;
-  });
-
   const FILTERS: (JobStatus | "All")[] = ["All", "In progress", "Want to apply", "Saved", "Applied (referred)", "Applied (no response)", "Closed"];
+  const STATUS_ORDER: JobStatus[] = ["In progress", "Want to apply", "Saved", "Applied (referred)", "Applied (no response)", "Closed"];
+  const sortKey = (j: Job) => (j.companyName || j.name || "").toLowerCase();
+
+  const renderJobRow = (j: Job) => {
+    const d = latestDate[j.id];
+    const fmt = d ? formatDate(d) : "";
+    return (
+      <div key={j.id} onClick={() => onSelect(j)}
+        style={{ background: "#fff", borderRadius: 12, padding: isMobile ? "12px 16px" : "22px 20px", cursor: "pointer", border: `1px solid ${C.border}`, borderLeft: `3px solid ${STATUS_BORDER[j.status]}`, transition: "box-shadow .15s", display: "flex", alignItems: isMobile ? "flex-start" : "center", gap: 16, minWidth: 0, overflow: "hidden" }}
+        onMouseEnter={e => (e.currentTarget as HTMLDivElement).style.boxShadow = "0 2px 14px rgba(0,0,0,0.07)"}
+        onMouseLeave={e => (e.currentTarget as HTMLDivElement).style.boxShadow = "none"}>
+        <CompanyLogo name={j.companyName || "?"} logoUrl={j.companyLogoUrl || undefined} size={40} radius={10} />
+        {isMobile ? (
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 15, fontWeight: 500, color: C.text, marginBottom: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{j.name}</div>
+            <div style={{ fontSize: 13, color: C.muted, marginBottom: 8, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{j.companyName}{j.location ? ` · ${j.location}` : ""}</div>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              <StatusBadge status={j.status} />
+              {fmt ? <span style={{ fontSize: 11, color: C.muted }}>{fmt}</span> : null}
+            </div>
+          </div>
+        ) : (
+          <>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 15, fontWeight: 500, color: C.text, marginBottom: 3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 400 }}>{j.name}</div>
+              <div style={{ fontSize: 13, color: C.muted }}>{j.companyName}{j.location ? ` · ${j.location}` : ""}</div>
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 9, flexShrink: 0 }}>
+              <StatusBadge status={j.status} />
+              {fmt ? <span style={{ fontSize: 11, color: C.muted }}>{fmt}</span> : null}
+            </div>
+          </>
+        )}
+      </div>
+    );
+  };
 
   return (
     <div style={{ maxWidth: isMobile ? "100%" : 760, margin: "0 auto" }}>
@@ -2157,7 +2268,10 @@ function JobsView({ jobs, activities, onSelect, archivedOpen, setArchivedOpen, s
         </div>
         <div style={{ display: "flex", gap: 7, alignItems: "center", overflowX: isMobile ? "auto" : "visible", flexWrap: isMobile ? "nowrap" : "wrap", paddingBottom: isMobile ? 2 : 0, minWidth: 0, width: isMobile ? "100%" : undefined }}>
           {FILTERS.map(f => {
-            const count = f === "All" ? activeJobs.length : activeJobs.filter(j => j.status === f).length;
+            const q = search.toLowerCase();
+            const count = f === "All"
+              ? jobs.filter(j => !q || j.name.toLowerCase().includes(q) || j.companyName.toLowerCase().includes(q)).length
+              : jobs.filter(j => j.status === f && (!q || j.name.toLowerCase().includes(q) || j.companyName.toLowerCase().includes(q))).length;
             const active = filter === f;
             return (
               <button key={f} onClick={() => setFilter(f)}
@@ -2175,65 +2289,49 @@ function JobsView({ jobs, activities, onSelect, archivedOpen, setArchivedOpen, s
         </div>
       )}
 
-      {(() => {
-        const STATUS_ORDER: JobStatus[] = ["In progress", "Want to apply", "Saved", "Applied (referred)", "Applied (no response)", "Closed"];
-        const sortKey = (j: Job) => (j.companyName || j.name || "").toLowerCase();
-        const groups = STATUS_ORDER
-          .map(status => filtered.filter(j => j.status === status).sort((a, b) => sortKey(a).localeCompare(sortKey(b))))
-          .filter(g => g.length > 0);
-        return (
-          <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
-            {groups.map((group, gi) => (
-              <div key={gi} style={{ display: "grid", gap: 8 }}>
-                {group.map(j => (
-                  <div key={j.id} onClick={() => onSelect(j)}
-                    style={{ background: "#fff", borderRadius: 12, padding: isMobile ? "12px 16px" : "22px 20px", cursor: "pointer", border: `1px solid ${C.border}`, borderLeft: `3px solid ${STATUS_BORDER[j.status]}`, transition: "box-shadow .15s", display: "flex", alignItems: isMobile ? "flex-start" : "center", gap: 16, minWidth: 0, overflow: "hidden" }}
-                    onMouseEnter={e => (e.currentTarget as HTMLDivElement).style.boxShadow = "0 2px 14px rgba(0,0,0,0.07)"}
-                    onMouseLeave={e => (e.currentTarget as HTMLDivElement).style.boxShadow = "none"}>
-                    <CompanyLogo name={j.companyName || "?"} logoUrl={j.companyLogoUrl || undefined} size={40} radius={10} />
-                    {isMobile ? (
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontSize: 15, fontWeight: 500, color: C.text, marginBottom: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{j.name}</div>
-                        <div style={{ fontSize: 13, color: C.muted, marginBottom: 8, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{j.companyName}{j.location ? ` · ${j.location}` : ""}</div>
-                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                          <StatusBadge status={j.status} />
-                          {(() => { const d = lastActivity[j.id] || jobCreatedDate[j.id]; const fmt = d ? formatDate(d) : ""; return fmt ? <span style={{ fontSize: 11, color: C.muted }}>{fmt}</span> : null; })()}
-                        </div>
+      {/* Time sections */}
+      {filtered.length > 0 && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          {TIME_SECTION_ORDER.map(bucket => {
+            const bucketJobs = filtered.filter(j => timeBucket(latestDate[j.id] || today()) === bucket);
+            if (bucketJobs.length === 0) return null;
+            const groups = STATUS_ORDER
+              .map(status => bucketJobs.filter(j => j.status === status).sort((a, b) => sortKey(a).localeCompare(sortKey(b))))
+              .filter(g => g.length > 0);
+            const isOpen = sectionOpen[bucket];
+            return (
+              <div key={bucket}>
+                <button onClick={() => toggleSection(bucket)}
+                  style={{ background: "none", border: "none", cursor: "pointer", display: "flex", alignItems: "center", gap: 5, color: C.muted, fontSize: 13, padding: "6px 0", marginBottom: isOpen ? 8 : 0 }}>
+                  {isOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                  {TIME_SECTION_LABEL[bucket]} ({bucketJobs.length} {bucketJobs.length === 1 ? "job" : "jobs"})
+                </button>
+                {isOpen && (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+                    {groups.map((group, gi) => (
+                      <div key={gi} style={{ display: "grid", gap: 8 }}>
+                        {group.map(renderJobRow)}
                       </div>
-                    ) : (
-                      <>
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ fontSize: 15, fontWeight: 500, color: C.text, marginBottom: 3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 400 }}>{j.name}</div>
-                          <div style={{ fontSize: 13, color: C.muted }}>{j.companyName}{j.location ? ` · ${j.location}` : ""}</div>
-                        </div>
-                        <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 9, flexShrink: 0 }}>
-                          <StatusBadge status={j.status} />
-                          {(() => { const d = lastActivity[j.id] || jobCreatedDate[j.id]; const fmt = d ? formatDate(d) : ""; return fmt ? <span style={{ fontSize: 11, color: C.muted }}>{fmt}</span> : null; })()}
-                        </div>
-                      </>
-                    )}
+                    ))}
                   </div>
-                ))}
+                )}
               </div>
-            ))}
-          </div>
-        );
-      })()}
+            );
+          })}
+        </div>
+      )}
 
       {/* Archived disclosure */}
-      {allArchivedJobs.length > 0 && (
+      {archivedJobs.length > 0 && (
         <div ref={archivedRef} style={{ marginTop: 12 }}>
           <button onClick={() => setArchivedOpen(o => !o)}
             style={{ background: "none", border: "none", cursor: "pointer", display: "flex", alignItems: "center", gap: 5, color: C.muted, fontSize: 13, padding: "6px 0" }}>
             {archivedOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-            Archived · {archivedJobs.length}{filter !== "All" ? ` of ${allArchivedJobs.length}` : ""}
+            Archived ({archivedJobs.length} {archivedJobs.length === 1 ? "job" : "jobs"})
           </button>
           {archivedOpen && (
             <div style={{ display: "grid", gap: 8, marginTop: 6 }}>
-              {archivedJobs.filter(j => {
-                const q = search.toLowerCase();
-                return !q || j.name.toLowerCase().includes(q) || j.companyName.toLowerCase().includes(q);
-              }).map(j => (
+              {archivedJobs.map(j => (
                 <div key={j.id} onClick={() => onSelect(j)}
                   style={{ background: "#fff", borderRadius: 12, padding: "16px 20px", cursor: "pointer", border: `1px solid ${C.border}`, borderLeft: `3px solid ${STATUS_BORDER[j.status] ?? "#D1D5DB"}`, display: "flex", alignItems: "center", gap: 16, opacity: 0.55, transition: "box-shadow .15s" }}
                   onMouseEnter={e => (e.currentTarget as HTMLDivElement).style.boxShadow = "0 2px 14px rgba(0,0,0,0.07)"}
