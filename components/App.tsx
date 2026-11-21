@@ -2664,9 +2664,10 @@ function JobsView({ jobs, activities, onSelect, archivedOpen, setArchivedOpen, s
       : { border: `1px solid ${C.border}`, borderLeft: `3px solid ${STATUS_BORDER[j.status]}`, padding: isMobile ? "12px 16px" : "22px 20px", boxShadow: (hoveredId === j.id || previewId === j.id) ? "0 2px 14px rgba(0,0,0,0.07)" : "none" };
 
     // Touch: no gutter (no checkbox); desktop: 44px left zone for checkbox hover area.
+    // minWidth: 0 is the standard CSS Grid blowout fix.
     const wrapperStyle: React.CSSProperties = isTouch
-      ? { position: "relative" as const }
-      : { position: "relative" as const, marginLeft: -44, paddingLeft: 44 };
+      ? { position: "relative" as const, minWidth: 0 }
+      : { position: "relative" as const, marginLeft: -44, paddingLeft: 44, minWidth: 0 };
 
     // Checkbox: fast fade-in (120ms), slow fade-out with short delay (470ms + 50ms delay)
     const cbTransition = showCb ? "opacity 0.12s" : "opacity 0.47s ease-out 0.05s";
@@ -2904,8 +2905,8 @@ function JobsView({ jobs, activities, onSelect, archivedOpen, setArchivedOpen, s
                   ? { borderTop: `2px solid #4493FC`, borderBottom: `2px solid #4493FC`, borderLeft: `4px solid #4493FC`, borderRight: `4px solid #4493FC`, padding: "15px 17px 15px 19px" }
                   : { border: `1px solid ${C.border}`, borderLeft: `3px solid ${STATUS_BORDER[j.status] ?? "#D1D5DB"}`, padding: "16px 20px", boxShadow: (hoveredId === j.id || previewId === j.id) ? "0 2px 14px rgba(0,0,0,0.07)" : "none" };
                 const archWrapperStyle: React.CSSProperties = isTouch
-                  ? { position: "relative" as const }
-                  : { position: "relative" as const, marginLeft: -44, paddingLeft: 44 };
+                  ? { position: "relative" as const, minWidth: 0 }
+                  : { position: "relative" as const, marginLeft: -44, paddingLeft: 44, minWidth: 0 };
                 const cbTrans = showCb ? "opacity 0.12s" : "opacity 0.47s ease-out 0.05s";
                 return (
                   <div key={j.id} style={archWrapperStyle}
