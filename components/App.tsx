@@ -1,5 +1,5 @@
 "use client";
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import type { Company, CompanyLink, Job, Activity, Asset, JobStatus, ActivityType, AssetType, PersonTitle } from "@/lib/notion";
 import {
   Plus, X, ExternalLink, ChevronRight, ChevronLeft, ChevronDown,
@@ -19,6 +19,40 @@ function useIsMobile() {
     return () => window.removeEventListener("resize", check);
   }, []);
   return isMobile;
+}
+
+function useIsTouch() {
+  const [isTouch, setIsTouch] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia("(pointer: coarse)");
+    setIsTouch(mq.matches);
+    const handler = (e: MediaQueryListEvent) => setIsTouch(e.matches);
+    mq.addEventListener("change", handler);
+    return () => mq.removeEventListener("change", handler);
+  }, []);
+  return isTouch;
+}
+
+function usePrefersReducedMotion() {
+  const [prefers, setPrefers] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
+    setPrefers(mq.matches);
+    const handler = (e: MediaQueryListEvent) => setPrefers(e.matches);
+    mq.addEventListener("change", handler);
+    return () => mq.removeEventListener("change", handler);
+  }, []);
+  return prefers;
+}
+
+async function fetchWithRetry(url: string, options: RequestInit, retries = 3): Promise<Response> {
+  const res = await fetch(url, options);
+  if (res.status === 429 && retries > 0) {
+    const after = parseInt(res.headers.get("Retry-After") ?? "1") * 1000;
+    await new Promise(r => setTimeout(r, Math.max(after, 1000)));
+    return fetchWithRetry(url, options, retries - 1);
+  }
+  return res;
 }
 
 function useEdgeSwipeBack(onBack: () => void): React.RefObject<HTMLDivElement | null> {
@@ -463,7 +497,11 @@ function MentionTextarea({ value, onChange, placeholder, assets, onCreateAsset }
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (!isOpen) return;
+    if (!isOpen) {
+      // Let native undo/redo work without interference from the global handler
+      if ((e.metaKey || e.ctrlKey) && (e.key === 'z' || e.key === 'y')) e.stopPropagation();
+      return;
+    }
     const totalItems = filtered.length + (onCreateAsset ? 1 : 0);
     if (e.key === "ArrowDown") { e.preventDefault(); setSelectedIdx(i => Math.min(i + 1, Math.max(totalItems - 1, 0))); }
     else if (e.key === "ArrowUp") { e.preventDefault(); setSelectedIdx(i => Math.max(i - 1, 0)); }
@@ -2167,17 +2205,26 @@ const TIME_SECTION_LABEL: Record<TimeBucket, string> = {
 
 const TIME_SECTION_ORDER: TimeBucket[] = ["last30", "31to90", "older"];
 
+interface UndoRecord {
+  jobsBefore: { id: string; status: JobStatus; archived: boolean }[];
+  activitiesCreated: string[];
+}
+
 // ── Jobs View ──────────────────────────────────────────────────────────────
 
-function JobsView({ jobs, activities, onSelect, archivedOpen, setArchivedOpen, scrollToArchived, onAfterScroll, filter, setFilter }: {
+function JobsView({ jobs, activities, onSelect, archivedOpen, setArchivedOpen, scrollToArchived, onAfterScroll, filter, setFilter, onJobsBulkUpdate, onActivitiesAdd, onActivityDelete }: {
   jobs: Job[]; activities: Activity[];
   onSelect: (j: Job) => void;
   archivedOpen: boolean; setArchivedOpen: (v: boolean | ((prev: boolean) => boolean)) => void;
   scrollToArchived?: boolean;
   onAfterScroll?: () => void;
   filter: JobStatus | "All"; setFilter: (f: JobStatus | "All") => void;
+  onJobsBulkUpdate: (updates: { id: string; status?: JobStatus; archived?: boolean }[]) => void;
+  onActivitiesAdd: (acts: Activity[]) => void;
+  onActivityDelete: (id: string) => void;
 }) {
   const [search, setSearch] = useState("");
+  const searchInputRef = useRef<HTMLInputElement>(null);
   const archivedRef = useRef<HTMLDivElement>(null);
   // Per-section open state, persisted in localStorage
   const [sectionOpen, setSectionOpen] = useState<Record<TimeBucket, boolean>>(() => {
@@ -2200,6 +2247,54 @@ function JobsView({ jobs, activities, onSelect, archivedOpen, setArchivedOpen, s
     }
   }, []);
   const isMobile = useIsMobile();
+  const isTouch = useIsTouch();
+  const reducedMotion = usePrefersReducedMotion();
+
+  // ── Selection state ──────────────────────────────────────────────────────
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [lastClickedId, setLastClickedId] = useState<string | null>(null);
+  const [batchRunning, setBatchRunning] = useState(false);
+  const [batchProgress, setBatchProgress] = useState<string | null>(null);
+  const [batchCount, setBatchCount] = useState(0);
+  const [batchTotal, setBatchTotal] = useState(0);
+  const [activeAction, setActiveAction] = useState<"archive" | "unarchive" | "status" | null>(null);
+  const [undoRecord, setUndoRecord] = useState<UndoRecord | null>(null);
+  const [toast, setToast] = useState<{ msg: string; canUndo: boolean; progress?: number } | null>(null);
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // ─── Hover / trail-mode constants ───────────────────────────────────────────
+  // Stillness required (ms) before entering trail mode for the first time (or after it ends).
+  const CHECKBOX_DWELL_MS = 450;
+  // Trail mode ends automatically if the pointer has been idle this long (ms).
+  const CHECKBOX_IDLE_RESET_MS = 4000;
+  // Grace period (ms) after the pointer leaves all jobs before trail mode ends — lets the
+  // pointer cross section-header gaps or small inter-card gaps without breaking the trail.
+  const TRAIL_EXIT_GRACE_MS = 300;
+
+  // ─── Hover / trail-mode state & refs ─────────────────────────────────────────
+  const [trailMode, setTrailMode] = useState(false);
+  const [hoveredId, setHoveredId] = useState<string | null>(null);
+  const [previewId, setPreviewId] = useState<string | null>(null);
+  // Refs (safe to read inside timer callbacks without stale-closure issues)
+  const trailModeRef = useRef(false);
+  const dwellTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const idleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const trailExitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Gate: the pointer must have MOVED since trail mode last ended (or since page load) before
+  // the dwell timer is allowed to start. A pointer resting still on a card never starts it.
+  const hasMovedRef = useRef(false);
+  const dwellOrigin = useRef<{ x: number; y: number; id: string } | null>(null);
+  const lastMouseY = useRef<number>(0);
+  const movingDown = useRef<boolean>(true);
+  const [pressingId, setPressingId] = useState<string | null>(null);
+  const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const longPressStart = useRef<{ x: number; y: number } | null>(null);
+  const justLongPressed = useRef(false);
+  const bulkBarContentRef = useRef<HTMLDivElement>(null);
+  const filterRowContentRef = useRef<HTMLDivElement>(null);
+  const [bulkBarH, setBulkBarH] = useState(44);
+  const [filterRowH, setFilterRowH] = useState(36);
+
+  const selectionMode = selectedIds.size > 0;
 
   const activeJobs = jobs.filter(j => !j.archived);
   const allArchivedJobs = jobs.filter(j => j.archived);
@@ -2224,62 +2319,533 @@ function JobsView({ jobs, activities, onSelect, archivedOpen, setArchivedOpen, s
   const STATUS_ORDER: JobStatus[] = ["In progress", "Want to apply", "Saved", "Applied (referred)", "Applied (no response)", "Closed"];
   const sortKey = (j: Job) => (j.companyName || j.name || "").toLowerCase();
 
+  const visibleJobIds = useMemo(() => {
+    const ids: string[] = [];
+    for (const bucket of TIME_SECTION_ORDER) {
+      if (!sectionOpen[bucket]) continue;
+      const bj = filtered.filter(j => timeBucket(latestDate[j.id] || today()) === bucket);
+      for (const st of STATUS_ORDER) {
+        bj.filter(j => j.status === st).sort((a, b) => sortKey(a).localeCompare(sortKey(b))).forEach(j => ids.push(j.id));
+      }
+    }
+    if (archivedOpen) archivedJobs.forEach(j => ids.push(j.id));
+    return ids;
+  }, [filtered, archivedJobs, sectionOpen, archivedOpen, latestDate]);
+
+  const showToast = (msg: string, canUndo: boolean, progress?: number) => {
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    setToast({ msg, canUndo, progress });
+    if (progress === undefined || progress >= 1) {
+      toastTimer.current = setTimeout(() => setToast(null), 6000);
+    }
+  };
+
+  const exitTrailMode = () => {
+    trailModeRef.current = false;
+    setTrailMode(false);
+    setHoveredId(null);
+    setPreviewId(null);
+    // After trail mode ends, the pointer must move again before the dwell timer is allowed.
+    hasMovedRef.current = false;
+    if (idleTimerRef.current) { clearTimeout(idleTimerRef.current); idleTimerRef.current = null; }
+    if (trailExitTimerRef.current) { clearTimeout(trailExitTimerRef.current); trailExitTimerRef.current = null; }
+  };
+
+  const resetIdleTimer = () => {
+    if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
+    idleTimerRef.current = setTimeout(() => {
+      if (trailModeRef.current) exitTrailMode();
+    }, CHECKBOX_IDLE_RESET_MS);
+  };
+
+  const hoverEnter = (id: string, e: React.MouseEvent) => {
+    if (trailModeRef.current) {
+      // Already in trail mode: switch to this job immediately (no dwell needed).
+      if (trailExitTimerRef.current) { clearTimeout(trailExitTimerRef.current); trailExitTimerRef.current = null; }
+      setHoveredId(id);
+      setPreviewId(null);
+      resetIdleTimer();
+    } else {
+      // Not in trail mode: start the dwell timer only if the pointer has moved since last exit.
+      if (!hasMovedRef.current) return;
+      if (dwellTimerRef.current) clearTimeout(dwellTimerRef.current);
+      dwellOrigin.current = { x: e.clientX, y: e.clientY, id };
+      dwellTimerRef.current = setTimeout(() => {
+        dwellOrigin.current = null;
+        trailModeRef.current = true;
+        setTrailMode(true);
+        setHoveredId(id);
+        setPreviewId(null);
+        resetIdleTimer();
+      }, CHECKBOX_DWELL_MS);
+    }
+  };
+
+  const hoverLeave = (id: string) => {
+    if (trailModeRef.current) {
+      // Leaving the real area of a job: fade it out immediately; start grace-period timer for
+      // trail exit (cancelled if the pointer enters another job within TRAIL_EXIT_GRACE_MS).
+      setHoveredId(prev => (prev === id ? null : prev));
+      setPreviewId(null);
+      if (trailExitTimerRef.current) clearTimeout(trailExitTimerRef.current);
+      trailExitTimerRef.current = setTimeout(() => {
+        if (trailModeRef.current) exitTrailMode();
+      }, TRAIL_EXIT_GRACE_MS);
+    } else {
+      // Not in trail mode: cancel any pending dwell for this card.
+      if (dwellOrigin.current?.id === id) {
+        if (dwellTimerRef.current) { clearTimeout(dwellTimerRef.current); dwellTimerRef.current = null; }
+        dwellOrigin.current = null;
+      }
+    }
+  };
+
+  // Tracks direction and handles: (a) dwell-restart on movement before trail starts, and
+  // (b) direction-aware anticipation preview and idle-timer reset while in trail mode.
+  const handleCardMouseMove = (e: React.MouseEvent<HTMLDivElement>, id: string) => {
+    movingDown.current = e.clientY >= lastMouseY.current;
+    lastMouseY.current = e.clientY;
+
+    if (trailModeRef.current) {
+      resetIdleTimer();
+      // Anticipation: when pointer is in the outer 33% of the card heading toward a neighbor,
+      // fade in that neighbor's checkbox before the pointer arrives.
+      if (hoveredId === id) {
+        const rect = e.currentTarget.getBoundingClientRect();
+        const frac = (e.clientY - rect.top) / rect.height;
+        const nearEdge = movingDown.current ? frac > 0.67 : frac < 0.33;
+        if (nearEdge) {
+          const idx = visibleJobIds.indexOf(id);
+          if (idx >= 0) {
+            const neighborId = movingDown.current ? visibleJobIds[idx + 1] : visibleJobIds[idx - 1];
+            setPreviewId(neighborId ?? null);
+          }
+        } else {
+          setPreviewId(null);
+        }
+      }
+    } else {
+      // Before trail mode: any movement marks the pointer as "has moved", allowing dwell to start.
+      hasMovedRef.current = true;
+      // If a dwell is in progress and the pointer moved more than ~6 px, restart the timer.
+      if (dwellOrigin.current?.id === id) {
+        const dx = e.clientX - dwellOrigin.current.x;
+        const dy = e.clientY - dwellOrigin.current.y;
+        if (dx * dx + dy * dy > 36) {
+          if (dwellTimerRef.current) clearTimeout(dwellTimerRef.current);
+          dwellOrigin.current = { x: e.clientX, y: e.clientY, id };
+          dwellTimerRef.current = setTimeout(() => {
+            dwellOrigin.current = null;
+            trailModeRef.current = true;
+            setTrailMode(true);
+            setHoveredId(id);
+            setPreviewId(null);
+            resetIdleTimer();
+          }, CHECKBOX_DWELL_MS);
+        }
+      }
+    }
+  };
+
+  const toggleSelect = (id: string) => {
+    setSelectedIds(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
+    setLastClickedId(id);
+  };
+
+  const handleCheckboxClick = (e: React.MouseEvent, id: string) => {
+    e.stopPropagation();
+    if (e.shiftKey && lastClickedId && visibleJobIds.includes(id) && visibleJobIds.includes(lastClickedId)) {
+      const si = visibleJobIds.indexOf(lastClickedId), ei = visibleJobIds.indexOf(id);
+      const [from, to] = si <= ei ? [si, ei] : [ei, si];
+      const range = visibleJobIds.slice(from, to + 1);
+      const wasChecked = selectedIds.has(id);
+      setSelectedIds(prev => { const n = new Set(prev); range.forEach(rid => wasChecked ? n.delete(rid) : n.add(rid)); return n; });
+    } else {
+      toggleSelect(id);
+    }
+    setLastClickedId(id);
+  };
+
+  const handleCardClick = (j: Job) => {
+    if (justLongPressed.current) return;
+    if (selectionMode) { toggleSelect(j.id); } else { onSelect(j); }
+  };
+
+  const handleTouchStart = (e: React.TouchEvent, jobId: string) => {
+    const t = e.touches[0];
+    longPressStart.current = { x: t.clientX, y: t.clientY };
+    setPressingId(jobId);
+    longPressTimer.current = setTimeout(() => {
+      setPressingId(null);
+      justLongPressed.current = true;
+      if (typeof navigator !== "undefined") (navigator as any).vibrate?.(10);
+      toggleSelect(jobId);
+      setTimeout(() => { justLongPressed.current = false; }, 300);
+    }, 500);
+  };
+  const handleTouchMove = (e: React.TouchEvent) => {
+    if (!longPressStart.current) return;
+    const t = e.touches[0];
+    const dx = t.clientX - longPressStart.current.x, dy = t.clientY - longPressStart.current.y;
+    if (Math.sqrt(dx * dx + dy * dy) > 10) { clearTimeout(longPressTimer.current!); setPressingId(null); }
+  };
+  const handleTouchEnd = () => { clearTimeout(longPressTimer.current!); setPressingId(null); };
+
+  const DELAY = 350;
+
+  const performUndo = async () => {
+    if (!undoRecord) return;
+    const { jobsBefore, activitiesCreated } = undoRecord;
+    setUndoRecord(null);
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    setToast(null);
+    setBatchRunning(true);
+    const restored: { id: string; status: JobStatus; archived: boolean }[] = [];
+    for (let i = 0; i < jobsBefore.length; i++) {
+      const { id, status, archived } = jobsBefore[i];
+      try {
+        await fetchWithRetry(`/api/jobs/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status, archived }) });
+        restored.push({ id, status, archived });
+      } catch {}
+      if (i < jobsBefore.length - 1) await new Promise(r => setTimeout(r, DELAY));
+    }
+    for (let i = 0; i < activitiesCreated.length; i++) {
+      try { await fetchWithRetry(`/api/activities/${activitiesCreated[i]}`, { method: "DELETE" }); onActivityDelete(activitiesCreated[i]); } catch {}
+      if (i < activitiesCreated.length - 1) await new Promise(r => setTimeout(r, DELAY));
+    }
+    if (restored.length > 0) onJobsBulkUpdate(restored);
+    setBatchRunning(false);
+    showToast("Undone", false);
+  };
+
+  const handleBulkArchive = async (doArchive: boolean) => {
+    const targets = [...selectedIds].map(id => jobs.find(j => j.id === id)!).filter(j => j && j.archived !== doArchive);
+    if (!targets.length) return;
+    const before = targets.map(j => ({ id: j.id, status: j.status, archived: j.archived }));
+    const verb = doArchive ? "Archiving" : "Unarchiving";
+    setBatchRunning(true); setBatchTotal(targets.length); setBatchCount(0);
+    setActiveAction(doArchive ? "archive" : "unarchive");
+    setSelectedIds(new Set());
+    // Show toast immediately with 0 progress
+    showToast(`${verb} 0 of ${targets.length}…`, false, 0);
+    const succeeded: string[] = [];
+    for (let i = 0; i < targets.length; i++) {
+      const j = targets[i];
+      setBatchProgress(`${verb} ${i + 1} of ${targets.length}…`);
+      setBatchCount(i + 1);
+      setToast(t => t ? { ...t, msg: `${verb} ${i + 1} of ${targets.length}…`, progress: (i + 1) / targets.length } : t);
+      try {
+        const res = await fetchWithRetry(`/api/jobs/${j.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ archived: doArchive }) });
+        if (res.ok) succeeded.push(j.id);
+      } catch {}
+      if (i < targets.length - 1) await new Promise(r => setTimeout(r, DELAY));
+    }
+    setBatchProgress(null); setBatchRunning(false); setActiveAction(null);
+    if (succeeded.length > 0) {
+      onJobsBulkUpdate(succeeded.map(id => ({ id, archived: doArchive })));
+      setUndoRecord({ jobsBefore: before.filter(b => succeeded.includes(b.id)), activitiesCreated: [] });
+    }
+    const label = doArchive ? "archived" : "unarchived";
+    const failed = targets.length - succeeded.length;
+    // Transition toast smoothly to result (progress bar fills to 100% then result message)
+    setToast(t => t ? { ...t, msg: failed > 0 ? `${succeeded.length} ${label}, ${failed} failed` : `${succeeded.length} ${succeeded.length === 1 ? "job" : "jobs"} ${label}`, canUndo: succeeded.length > 0, progress: 1 } : t);
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    toastTimer.current = setTimeout(() => setToast(null), 6000);
+  };
+
+  const handleBulkStatus = async (newStatus: JobStatus) => {
+    const targets = [...selectedIds].map(id => jobs.find(j => j.id === id)!).filter(j => j && j.status !== newStatus);
+    if (!targets.length) return;
+    const before = targets.map(j => ({ id: j.id, status: j.status, archived: j.archived }));
+    setBatchRunning(true); setBatchTotal(targets.length); setBatchCount(0);
+    setActiveAction("status");
+    setSelectedIds(new Set());
+    showToast(`Updating status 0 of ${targets.length}…`, false, 0);
+    const succeeded: string[] = [];
+    const actsCreated: string[] = [];
+    const newActs: Activity[] = [];
+    for (let i = 0; i < targets.length; i++) {
+      const j = targets[i];
+      setBatchProgress(`Updating status ${i + 1} of ${targets.length}…`);
+      setBatchCount(i + 1);
+      setToast(t => t ? { ...t, msg: `Updating status ${i + 1} of ${targets.length}…`, progress: (i + 1) / targets.length } : t);
+      try {
+        const jobRes = await fetchWithRetry(`/api/jobs/${j.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status: newStatus }) });
+        if (!jobRes.ok) throw new Error("job patch failed");
+        await new Promise(r => setTimeout(r, DELAY));
+        const prevLabel = STATUS_LABEL[j.status] ?? j.status;
+        const newLabel = STATUS_LABEL[newStatus] ?? newStatus;
+        const actRes = await fetchWithRetry("/api/activities", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ type: "Status changed", date: today(), notes: `Status changed from ${prevLabel} to ${newLabel}`, jobId: j.id }) });
+        if (actRes.ok) {
+          const actData = await actRes.json();
+          if (actData.id) { actsCreated.push(actData.id); newActs.push(actData); }
+        }
+        succeeded.push(j.id);
+      } catch {}
+      if (i < targets.length - 1) await new Promise(r => setTimeout(r, DELAY));
+    }
+    setBatchProgress(null); setBatchRunning(false); setActiveAction(null);
+    if (succeeded.length > 0) {
+      onJobsBulkUpdate(succeeded.map(id => ({ id, status: newStatus })));
+      if (newActs.length > 0) onActivitiesAdd(newActs);
+      setUndoRecord({ jobsBefore: before.filter(b => succeeded.includes(b.id)), activitiesCreated: actsCreated });
+    }
+    const failed = targets.length - succeeded.length;
+    setToast(t => t ? { ...t, msg: failed > 0 ? `${succeeded.length} updated, ${failed} failed` : `${succeeded.length} → ${STATUS_LABEL[newStatus] ?? newStatus}`, canUndo: succeeded.length > 0, progress: 1 } : t);
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    toastTimer.current = setTimeout(() => setToast(null), 6000);
+  };
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      const inInput = !!(e.target as HTMLElement)?.closest("input, textarea, [contenteditable]");
+      if ((e.metaKey || e.ctrlKey) && e.key === "a" && !inInput && visibleJobIds.length > 0) {
+        e.preventDefault(); setSelectedIds(new Set(visibleJobIds));
+      } else if (e.key === "Escape" && selectionMode) {
+        setSelectedIds(new Set());
+      } else if ((e.metaKey || e.ctrlKey) && e.key === "z" && !batchRunning && !inInput && undoRecord) {
+        performUndo();
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [visibleJobIds, selectionMode, undoRecord, batchRunning]);
+
+  useEffect(() => {
+    const measure = () => {
+      if (bulkBarContentRef.current) setBulkBarH(bulkBarContentRef.current.offsetHeight);
+      if (filterRowContentRef.current) setFilterRowH(filterRowContentRef.current.offsetHeight);
+    };
+    measure();
+    const obs = new ResizeObserver(measure);
+    if (bulkBarContentRef.current) obs.observe(bulkBarContentRef.current);
+    if (filterRowContentRef.current) obs.observe(filterRowContentRef.current);
+    return () => obs.disconnect();
+  }, []);
+
+  // Document-level listeners for the trail-mode hover system (uses refs only → stable, no deps).
+  // mousemove: marks that the pointer has moved (gate for allowing the dwell timer to start).
+  // wheel: scroll counts as activity and resets the idle timer, but does not start trail mode.
+  useEffect(() => {
+    const onDocMove = () => { hasMovedRef.current = true; };
+    const onWheel = () => {
+      if (!trailModeRef.current) return;
+      if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
+      idleTimerRef.current = setTimeout(() => {
+        if (trailModeRef.current) {
+          trailModeRef.current = false;
+          setTrailMode(false);
+          setHoveredId(null);
+          setPreviewId(null);
+          hasMovedRef.current = false;
+          idleTimerRef.current = null;
+        }
+      }, CHECKBOX_IDLE_RESET_MS);
+    };
+    document.addEventListener("mousemove", onDocMove);
+    document.addEventListener("wheel", onWheel, { passive: true });
+    return () => {
+      document.removeEventListener("mousemove", onDocMove);
+      document.removeEventListener("wheel", onWheel);
+    };
+  }, []);
+
   const renderJobRow = (j: Job) => {
+    const isSelected = selectedIds.has(j.id);
+    // On touch: no checkboxes. On desktop: shown in selection mode, hovered, or anticipated.
+    const showCb = !isTouch && (selectionMode || hoveredId === j.id || previewId === j.id);
     const d = latestDate[j.id];
     const fmt = d ? formatDate(d) : "";
+
+    // Selected: 2px top/bottom, 4px left/right. Padding reduced by the extra border on each side
+    // vs unselected (top−1, bottom−1, left−1, right−3) so outer size and content don't move.
+    const cardBorderStyle: React.CSSProperties = isSelected
+      ? { borderTop: `2px solid #4493FC`, borderBottom: `2px solid #4493FC`, borderLeft: `4px solid #4493FC`, borderRight: `4px solid #4493FC`, padding: isMobile ? "11px 13px 11px 15px" : "21px 17px 21px 19px" }
+      : { border: `1px solid ${C.border}`, borderLeft: `3px solid ${STATUS_BORDER[j.status]}`, padding: isMobile ? "12px 16px" : "22px 20px", boxShadow: (hoveredId === j.id || previewId === j.id) ? "0 2px 14px rgba(0,0,0,0.07)" : "none" };
+
+    // Touch: no gutter (no checkbox); desktop: 44px left zone for checkbox hover area.
+    const wrapperStyle: React.CSSProperties = isTouch
+      ? { position: "relative" as const }
+      : { position: "relative" as const, marginLeft: -44, paddingLeft: 44 };
+
+    // Checkbox: fast fade-in (120ms), slow fade-out with short delay (470ms + 50ms delay)
+    const cbTransition = showCb ? "opacity 0.12s" : "opacity 0.47s ease-out 0.05s";
+
     return (
-      <div key={j.id} onClick={() => onSelect(j)}
-        style={{ background: "#fff", borderRadius: 12, padding: isMobile ? "12px 16px" : "22px 20px", cursor: "pointer", border: `1px solid ${C.border}`, borderLeft: `3px solid ${STATUS_BORDER[j.status]}`, transition: "box-shadow .15s", display: "flex", alignItems: isMobile ? "flex-start" : "center", gap: 16, minWidth: 0, overflow: "hidden" }}
-        onMouseEnter={e => (e.currentTarget as HTMLDivElement).style.boxShadow = "0 2px 14px rgba(0,0,0,0.07)"}
-        onMouseLeave={e => (e.currentTarget as HTMLDivElement).style.boxShadow = "none"}>
-        <CompanyLogo name={j.companyName || "?"} logoUrl={j.companyLogoUrl || undefined} size={40} radius={10} />
-        {isMobile ? (
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 15, fontWeight: 500, color: C.text, marginBottom: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{j.name}</div>
-            <div style={{ fontSize: 13, color: C.muted, marginBottom: 8, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{j.companyName}{j.location ? ` · ${j.location}` : ""}</div>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-              <StatusBadge status={j.status} />
-              {fmt ? <span style={{ fontSize: 11, color: C.muted }}>{fmt}</span> : null}
-            </div>
+      <div key={j.id} style={wrapperStyle}
+        onMouseEnter={isTouch ? undefined : (e) => hoverEnter(j.id, e)}
+        onMouseLeave={isTouch ? undefined : () => hoverLeave(j.id)}
+        onMouseMove={isTouch ? undefined : (e) => handleCardMouseMove(e, j.id)}>
+        {/* Checkbox — only rendered on non-touch; sits in 44px left padding zone */}
+        {!isTouch && <div style={{
+          position: "absolute",
+          left: 12,
+          top: "50%", transform: "translateY(-50%)",
+          opacity: showCb ? 1 : 0,
+          pointerEvents: "auto",
+          transition: cbTransition,
+          cursor: "pointer",
+          zIndex: 1,
+        }} onClick={e => handleCheckboxClick(e, j.id)}>
+          <div style={{ width: 20, height: 20, borderRadius: 4, border: isSelected ? "2px solid #4493FC" : "2px solid #A8A29E", background: isSelected ? "#4493FC" : "#fff", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+            {isSelected && <Check size={11} color="#fff" strokeWidth={3} />}
           </div>
-        ) : (
-          <>
+        </div>}
+        {/* Card */}
+        <div style={{ background: "#fff", borderRadius: 12, cursor: "pointer", transition: "box-shadow .15s", display: "flex", alignItems: isMobile ? "flex-start" : "center", gap: 16, minWidth: 0, overflow: "hidden", WebkitTouchCallout: "none" as any, userSelect: "none", transform: pressingId === j.id ? "scale(0.985)" : "none", ...cardBorderStyle }}
+          onClick={() => handleCardClick(j)}
+          onTouchStart={e => handleTouchStart(e, j.id)}
+          onTouchMove={handleTouchMove}
+          onTouchEnd={handleTouchEnd}>
+          <CompanyLogo name={j.companyName || "?"} logoUrl={j.companyLogoUrl || undefined} size={40} radius={10} />
+          {isMobile ? (
             <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontSize: 15, fontWeight: 500, color: C.text, marginBottom: 3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 400 }}>{j.name}</div>
-              <div style={{ fontSize: 13, color: C.muted }}>{j.companyName}{j.location ? ` · ${j.location}` : ""}</div>
+              <div style={{ fontSize: 15, fontWeight: 500, color: C.text, marginBottom: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{j.name}</div>
+              <div style={{ fontSize: 13, color: C.muted, marginBottom: 8, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{j.companyName}{j.location ? ` · ${j.location}` : ""}</div>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                <StatusBadge status={j.status} />
+                {fmt ? <span style={{ fontSize: 11, color: C.muted }}>{fmt}</span> : null}
+              </div>
             </div>
-            <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 9, flexShrink: 0 }}>
-              <StatusBadge status={j.status} />
-              {fmt ? <span style={{ fontSize: 11, color: C.muted }}>{fmt}</span> : null}
-            </div>
-          </>
-        )}
+          ) : (
+            <>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 15, fontWeight: 500, color: C.text, marginBottom: 3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 400 }}>{j.name}</div>
+                <div style={{ fontSize: 13, color: C.muted }}>{j.companyName}{j.location ? ` · ${j.location}` : ""}</div>
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 9, flexShrink: 0 }}>
+                <StatusBadge status={j.status} />
+                {fmt ? <span style={{ fontSize: 11, color: C.muted }}>{fmt}</span> : null}
+              </div>
+            </>
+          )}
+        </div>
       </div>
     );
   };
 
   return (
-    <div style={{ maxWidth: isMobile ? "100%" : 760, margin: "0 auto" }}>
-      {/* Search + filter pills row */}
-      <div style={{ display: "flex", flexDirection: isMobile ? "column" : "row", alignItems: isMobile ? "stretch" : "flex-start", gap: 10, marginBottom: 20 }}>
-        <div style={{ position: "relative" }}>
-          <Search size={14} style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", color: C.muted }} />
-          <input style={{ ...inputStyle, padding: "6px 12px", paddingLeft: 34, width: "100%" }} placeholder="Search jobs…" value={search} onChange={e => setSearch(e.target.value)} />
+    <div style={{ maxWidth: isMobile ? "100%" : 760, margin: "0 auto", paddingLeft: !isTouch && selectionMode ? 44 : 0, transition: !isTouch ? "padding-left 0.2s" : undefined }}>
+      {/*
+        In-flow spacer: height animates between filterRowH and bulkBarH.
+        No sticky, no overflow:hidden — purely reserves space to push jobs smoothly.
+        The filter row is absolutely positioned inside (doesn't add to spacer height).
+        The bulk bar is separately position:fixed so it doesn't affect layout at all.
+      */}
+      <div style={{
+        position: "relative",
+        height: (selectionMode ? bulkBarH : filterRowH) || "auto",
+        marginBottom: selectionMode ? 12 : 20,
+        transition: reducedMotion ? "none" : "height 0.25s ease, margin-bottom 0.25s ease",
+        // overflow:hidden clips the crossfading children; does NOT affect the fixed bar.
+        overflow: "hidden",
+      }}>
+        {/* Filter row — fades out when entering selection mode */}
+        <div style={{
+          position: "absolute", top: 0, left: 0, right: 0,
+          opacity: selectionMode ? 0 : 1,
+          pointerEvents: selectionMode ? "none" : "auto",
+          transition: reducedMotion ? "opacity 0.15s" : "opacity 0.25s ease",
+        }}>
+          <div ref={filterRowContentRef} style={{ display: "flex", flexDirection: isMobile ? "column" : "row", alignItems: isMobile ? "stretch" : "flex-start", gap: 10 }}>
+            <div style={{ position: "relative" }}>
+              <Search size={14} style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", color: C.muted }} />
+              {/* D8: uncontrolled input so native Cmd+Z undo works */}
+              <input ref={searchInputRef} style={{ ...inputStyle, padding: "6px 12px", paddingLeft: 34, width: "100%" }} placeholder="Search jobs…" defaultValue="" onChange={e => setSearch(e.target.value)} />
+            </div>
+            <div style={{ display: "flex", gap: 7, alignItems: "center", overflowX: isMobile ? "auto" : "visible", flexWrap: isMobile ? "nowrap" : "wrap", paddingBottom: isMobile ? 2 : 0, minWidth: 0, width: isMobile ? "100%" : undefined }}>
+              {FILTERS.map(f => {
+                const q = search.toLowerCase();
+                const count = f === "All"
+                  ? jobs.filter(j => !q || j.name.toLowerCase().includes(q) || j.companyName.toLowerCase().includes(q)).length
+                  : jobs.filter(j => j.status === f && (!q || j.name.toLowerCase().includes(q) || j.companyName.toLowerCase().includes(q))).length;
+                const active = filter === f;
+                return (
+                  <button key={f} onClick={() => setFilter(f)}
+                    style={{ borderRadius: 20, padding: "6px 13px", fontSize: 12, fontWeight: 500, cursor: "pointer", border: active ? "1.5px solid #F55D3E" : "1.5px solid rgba(23,23,26,0.18)", background: active ? "#F55D3E" : "transparent", color: active ? "#fff" : "#7A776F", whiteSpace: "nowrap" as const, fontFamily: "ui-monospace, 'SF Mono', Menlo, monospace", flexShrink: 0 }}>
+                    {f === "All" ? "All" : (STATUS_LABEL[f as JobStatus] ?? f)} · {count}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
         </div>
-        <div style={{ display: "flex", gap: 7, alignItems: "center", overflowX: isMobile ? "auto" : "visible", flexWrap: isMobile ? "nowrap" : "wrap", paddingBottom: isMobile ? 2 : 0, minWidth: 0, width: isMobile ? "100%" : undefined }}>
-          {FILTERS.map(f => {
-            const q = search.toLowerCase();
-            const count = f === "All"
-              ? jobs.filter(j => !q || j.name.toLowerCase().includes(q) || j.companyName.toLowerCase().includes(q)).length
-              : jobs.filter(j => j.status === f && (!q || j.name.toLowerCase().includes(q) || j.companyName.toLowerCase().includes(q))).length;
-            const active = filter === f;
-            return (
-              <button key={f} onClick={() => setFilter(f)}
-                style={{ borderRadius: 20, padding: "6px 13px", fontSize: 12, fontWeight: 500, cursor: "pointer", border: active ? "1.5px solid #F55D3E" : "1.5px solid rgba(23,23,26,0.18)", background: active ? "#F55D3E" : "transparent", color: active ? "#fff" : "#7A776F", whiteSpace: "nowrap" as const, fontFamily: "ui-monospace, 'SF Mono', Menlo, monospace", flexShrink: 0 }}>
-                {f === "All" ? "All" : (STATUS_LABEL[f as JobStatus] ?? f)} · {count}
+
+        {/* Hidden measurement div for bulkBar — lives here so it's always rendered and measurable */}
+        <div ref={bulkBarContentRef} style={{
+          position: "absolute", top: 0, left: 0, right: 0,
+          visibility: "hidden", pointerEvents: "none",
+          background: "#4493FC", borderRadius: 10, padding: "10px 16px",
+          display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" as const, minHeight: 44,
+        }}>
+          <span style={{ fontSize: 14, fontWeight: 600 }}>1 selected</span>
+          <div style={{ flex: 1 }} />
+          <span style={{ background: "rgba(255,255,255,0.2)", borderRadius: 7, padding: "6px 12px", fontSize: 13 }}>Archive</span>
+          <span style={{ background: "rgba(255,255,255,0.2)", borderRadius: 7, padding: "6px 32px 6px 14px", fontSize: 13 }}>Set status…</span>
+        </div>
+      </div>
+
+      {/*
+        Fixed bulk bar — position:fixed so it never participates in layout.
+        Always at top:56 (desktop) / top:52 (mobile) under the app header.
+        Centered to match the content max-width via inner padding.
+        Shadow is on the blue bar itself to follow rounded corners.
+        Reduce-motion: quick opacity fade with no movement.
+      */}
+      <div style={{
+        position: "fixed",
+        top: isMobile ? 52 : 56,
+        left: 0, right: 0,
+        zIndex: 100,
+        padding: isMobile ? "12px 16px 0" : "12px 32px 0",
+        pointerEvents: selectionMode ? "auto" : "none",
+        opacity: selectionMode ? 1 : 0,
+        transform: reducedMotion ? undefined : (selectionMode ? "translateY(0)" : "translateY(-8px)"),
+        transition: reducedMotion
+          ? "opacity 0.15s"
+          : "opacity 0.25s ease, transform 0.25s ease",
+      }}>
+        <div style={{ maxWidth: 760, margin: "0 auto" }}>
+          <div style={{
+            background: "#4493FC", borderRadius: 10, padding: "10px 16px",
+            display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" as const, minHeight: 44,
+            boxShadow: selectionMode ? "0 2px 12px rgba(0,0,0,0.18)" : "none",
+            transition: "box-shadow 0.2s",
+          }}>
+            <button disabled={batchRunning} onClick={() => setSelectedIds(new Set())} style={{ background: "none", border: "none", color: "#fff", cursor: "pointer", display: "flex", alignItems: "center", gap: 6, fontSize: 14, fontWeight: 600, padding: 0, flexShrink: 0 }}>
+              <X size={16} />
+              <span>{selectedIds.size} selected</span>
+            </button>
+            <div style={{ flex: 1 }} />
+            {[...selectedIds].some(id => { const j = jobs.find(jj => jj.id === id); return j && !j.archived; }) && (
+              <button disabled={batchRunning} onClick={() => handleBulkArchive(true)}
+                style={{ background: "rgba(255,255,255,0.2)", border: "none", color: "#fff", borderRadius: 7, padding: "6px 12px", fontSize: 13, fontWeight: 600, cursor: batchRunning ? "default" : "pointer", display: "flex", alignItems: "center", gap: 6, opacity: batchRunning && activeAction !== "archive" ? 0.5 : 1 }}>
+                {batchRunning && activeAction === "archive" ? <Loader2 size={13} className="animate-spin" /> : null}
+                Archive
               </button>
-            );
-          })}
+            )}
+            {[...selectedIds].some(id => { const j = jobs.find(jj => jj.id === id); return j && j.archived; }) && (
+              <button disabled={batchRunning} onClick={() => handleBulkArchive(false)}
+                style={{ background: "rgba(255,255,255,0.2)", border: "none", color: "#fff", borderRadius: 7, padding: "6px 12px", fontSize: 13, fontWeight: 600, cursor: batchRunning ? "default" : "pointer", display: "flex", alignItems: "center", gap: 6, opacity: batchRunning && activeAction !== "unarchive" ? 0.5 : 1 }}>
+                {batchRunning && activeAction === "unarchive" ? <Loader2 size={13} className="animate-spin" /> : null}
+                Unarchive
+              </button>
+            )}
+            {/* C6: custom chevron */}
+            <div style={{ position: "relative", display: "inline-flex", alignItems: "center", opacity: batchRunning && activeAction !== "status" ? 0.5 : 1 }}>
+              <select disabled={batchRunning} defaultValue="" onChange={e => { if (e.target.value) handleBulkStatus(e.target.value as JobStatus); e.target.value = ""; }}
+                style={{ background: "rgba(255,255,255,0.2)", border: "none", color: "#fff", borderRadius: 7, padding: "6px 32px 6px 14px", fontSize: 13, fontWeight: 600, cursor: batchRunning ? "default" : "pointer", outline: "none", appearance: "none", WebkitAppearance: "none" } as React.CSSProperties}>
+                <option value="">Set status…</option>
+                {(["In progress", "Want to apply", "Saved", "Applied (referred)", "Applied (no response)", "Closed"] as JobStatus[]).map(s => (
+                  <option key={s} value={s} style={{ color: C.text, background: "#fff" }}>{STATUS_LABEL[s] ?? s}</option>
+                ))}
+              </select>
+              {batchRunning && activeAction === "status"
+                ? <Loader2 size={12} className="animate-spin" style={{ position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)", pointerEvents: "none", color: "#fff" }} />
+                : <ChevronDown size={12} style={{ position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)", pointerEvents: "none", color: "#fff" }} />
+              }
+            </div>
+          </div>
         </div>
       </div>
 
@@ -2331,19 +2897,60 @@ function JobsView({ jobs, activities, onSelect, archivedOpen, setArchivedOpen, s
           </button>
           {archivedOpen && (
             <div style={{ display: "grid", gap: 8, marginTop: 6 }}>
-              {archivedJobs.map(j => (
-                <div key={j.id} onClick={() => onSelect(j)}
-                  style={{ background: "#fff", borderRadius: 12, padding: "16px 20px", cursor: "pointer", border: `1px solid ${C.border}`, borderLeft: `3px solid ${STATUS_BORDER[j.status] ?? "#D1D5DB"}`, display: "flex", alignItems: "center", gap: 16, opacity: 0.55, transition: "box-shadow .15s" }}
-                  onMouseEnter={e => (e.currentTarget as HTMLDivElement).style.boxShadow = "0 2px 14px rgba(0,0,0,0.07)"}
-                  onMouseLeave={e => (e.currentTarget as HTMLDivElement).style.boxShadow = "none"}>
-                  <CompanyLogo name={j.companyName || "?"} logoUrl={j.companyLogoUrl || undefined} size={40} radius={10} />
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 15, fontWeight: 700, fontFamily: "Georgia, 'Times New Roman', serif", color: C.text }}>{j.name}</div>
-                    <div style={{ fontSize: 13, color: C.muted }}>{j.companyName}{j.location ? ` · ${j.location}` : ""}</div>
+              {archivedJobs.map(j => {
+                const isSel = selectedIds.has(j.id);
+                const showCb = !isTouch && (selectionMode || hoveredId === j.id || previewId === j.id);
+                const archBorder: React.CSSProperties = isSel
+                  ? { borderTop: `2px solid #4493FC`, borderBottom: `2px solid #4493FC`, borderLeft: `4px solid #4493FC`, borderRight: `4px solid #4493FC`, padding: "15px 17px 15px 19px" }
+                  : { border: `1px solid ${C.border}`, borderLeft: `3px solid ${STATUS_BORDER[j.status] ?? "#D1D5DB"}`, padding: "16px 20px", boxShadow: (hoveredId === j.id || previewId === j.id) ? "0 2px 14px rgba(0,0,0,0.07)" : "none" };
+                const archWrapperStyle: React.CSSProperties = isTouch
+                  ? { position: "relative" as const }
+                  : { position: "relative" as const, marginLeft: -44, paddingLeft: 44 };
+                const cbTrans = showCb ? "opacity 0.12s" : "opacity 0.47s ease-out 0.05s";
+                return (
+                  <div key={j.id} style={archWrapperStyle}
+                    onMouseEnter={isTouch ? undefined : (e) => hoverEnter(j.id, e)}
+                    onMouseLeave={isTouch ? undefined : () => hoverLeave(j.id)}
+                    onMouseMove={isTouch ? undefined : (e) => handleCardMouseMove(e, j.id)}>
+                    {!isTouch && <div style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", opacity: showCb ? 1 : 0, pointerEvents: "auto", transition: cbTrans, cursor: "pointer", zIndex: 1 }}
+                      onClick={e => handleCheckboxClick(e, j.id)}>
+                      <div style={{ width: 20, height: 20, borderRadius: 4, border: isSel ? "2px solid #4493FC" : "2px solid #A8A29E", background: isSel ? "#4493FC" : "#fff", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                        {isSel && <Check size={11} color="#fff" strokeWidth={3} />}
+                      </div>
+                    </div>}
+                    <div style={{ background: "#fff", borderRadius: 12, cursor: "pointer", display: "flex", alignItems: "center", gap: 16, opacity: isSel ? 1 : 0.55, transition: "box-shadow .15s", WebkitTouchCallout: "none" as any, userSelect: "none", transform: pressingId === j.id ? "scale(0.985)" : "none", ...archBorder }}
+                      onClick={() => handleCardClick(j)}
+                      onTouchStart={e => handleTouchStart(e, j.id)}
+                      onTouchMove={handleTouchMove}
+                      onTouchEnd={handleTouchEnd}>
+                      <CompanyLogo name={j.companyName || "?"} logoUrl={j.companyLogoUrl || undefined} size={40} radius={10} />
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 15, fontWeight: 700, fontFamily: "Georgia, 'Times New Roman', serif", color: C.text }}>{j.name}</div>
+                        <div style={{ fontSize: 13, color: C.muted }}>{j.companyName}{j.location ? ` · ${j.location}` : ""}</div>
+                      </div>
+                      <StatusBadge status={j.status} archived />
+                    </div>
                   </div>
-                  <StatusBadge status={j.status} archived />
-                </div>
-              ))}
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Toast — with optional progress bar */}
+      {toast && (
+        <div style={{ position: "fixed", bottom: 24, left: "50%", transform: "translateX(-50%)", background: C.text, color: "#fff", borderRadius: 10, padding: "12px 20px", display: "flex", flexDirection: "column", gap: 8, fontSize: 14, fontWeight: 500, zIndex: 1000, boxShadow: "0 4px 20px rgba(0,0,0,0.2)", minWidth: 240, maxWidth: "90vw" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+            <span style={{ flex: 1 }}>{toast.msg}</span>
+            {toast.canUndo && undoRecord && (
+              <button onClick={performUndo} style={{ color: "#4493FC", background: "none", border: "none", cursor: "pointer", fontSize: 14, fontWeight: 700, padding: 0, flexShrink: 0 }}>Undo</button>
+            )}
+            <button onClick={() => setToast(null)} style={{ color: "rgba(255,255,255,0.6)", background: "none", border: "none", cursor: "pointer", padding: 0, display: "flex", flexShrink: 0 }}><X size={14} /></button>
+          </div>
+          {toast.progress !== undefined && (
+            <div style={{ height: 3, borderRadius: 2, background: "rgba(255,255,255,0.2)", overflow: "hidden" }}>
+              <div style={{ height: "100%", borderRadius: 2, background: toast.progress >= 1 ? "#4ade80" : "#4493FC", width: `${Math.min(toast.progress * 100, 100)}%`, transition: "width 0.3s ease, background 0.4s ease", opacity: toast.progress >= 1 ? 0 : 1, transitionDelay: toast.progress >= 1 ? "0s, 0.5s" : "0s" }} />
             </div>
           )}
         </div>
@@ -3054,7 +3661,15 @@ export default function App() {
         {!loading && !error && (
           <>
             {view === "jobs" && !selectedJob && (
-              <JobsView jobs={jobs} activities={activities} onSelect={setSelectedJob} archivedOpen={archivedOpen} setArchivedOpen={setArchivedOpen} scrollToArchived={scrollToArchived} onAfterScroll={() => setScrollToArchived(false)} filter={jobsFilter} setFilter={setJobsFilter} />
+              <JobsView
+                jobs={jobs} activities={activities} onSelect={setSelectedJob}
+                archivedOpen={archivedOpen} setArchivedOpen={setArchivedOpen}
+                scrollToArchived={scrollToArchived} onAfterScroll={() => setScrollToArchived(false)}
+                filter={jobsFilter} setFilter={setJobsFilter}
+                onJobsBulkUpdate={updates => setJobs(js => js.map(j => { const u = updates.find(u => u.id === j.id); if (!u) return j; return { ...j, ...(u.status !== undefined ? { status: u.status } : {}), ...(u.archived !== undefined ? { archived: u.archived } : {}) }; }))}
+                onActivitiesAdd={acts => setActivities(prev => [...acts, ...prev])}
+                onActivityDelete={id => setActivities(prev => prev.filter(a => a.id !== id))}
+              />
             )}
             {view === "jobs" && selectedJob && (
               <JobDetailPage
