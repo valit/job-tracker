@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { notion, parseActivity } from "@/lib/notion";
+import { notion, parseActivity, ACTIVITY_DB } from "@/lib/notion";
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -22,6 +22,11 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 export async function DELETE(_: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params;
+    const page = await (notion as any).pages.retrieve({ page_id: id });
+    const parentDbId = (page?.parent?.database_id ?? "").replace(/-/g, "");
+    if (!parentDbId || parentDbId !== ACTIVITY_DB.replace(/-/g, "")) {
+      return NextResponse.json({ error: "Not an activity" }, { status: 403 });
+    }
     await notion.pages.update({ page_id: id, in_trash: true });
     return NextResponse.json({ ok: true });
   } catch (e: any) {
