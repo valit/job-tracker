@@ -2226,13 +2226,18 @@ function JobsView({ jobs, activities, onSelect, archivedOpen, setArchivedOpen, s
   const [search, setSearch] = useState("");
   const searchInputRef = useRef<HTMLInputElement>(null);
   const archivedRef = useRef<HTMLDivElement>(null);
-  // Per-section open state, persisted in localStorage
+  // Per-section open state. last30 is persisted in localStorage; 31to90 and older always
+  // start collapsed on page load regardless of what was remembered.
   const [sectionOpen, setSectionOpen] = useState<Record<TimeBucket, boolean>>(() => {
+    let last30 = true;
     try {
       const saved = localStorage.getItem("jobsTimeSectionOpen");
-      if (saved) return JSON.parse(saved);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        last30 = parsed.last30 ?? true;
+      }
     } catch {}
-    return { last30: true, "31to90": true, older: true };
+    return { last30, "31to90": false, older: false };
   });
   const toggleSection = (b: TimeBucket) => setSectionOpen(prev => {
     const next = { ...prev, [b]: !prev[b] };
