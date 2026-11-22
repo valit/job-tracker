@@ -2269,6 +2269,8 @@ function JobsView({ jobs, activities, onSelect, archivedOpen, setArchivedOpen, s
   // ─── Hover / trail-mode constants ───────────────────────────────────────────
   // Stillness required (ms) before entering trail mode for the first time (or after it ends).
   const CHECKBOX_DWELL_MS = 450;
+  // Width of the hover zone left of each card (matches the wrapper's 44px left padding).
+  const CHECKBOX_GUTTER_PX = 44;
   // Trail mode ends automatically if the pointer has been idle this long (ms).
   const CHECKBOX_IDLE_RESET_MS = 4000;
   // Grace period (ms) after the pointer leaves all jobs before trail mode ends — lets the
@@ -2432,6 +2434,19 @@ function JobsView({ jobs, activities, onSelect, archivedOpen, setArchivedOpen, s
     } else {
       // Before trail mode: any movement marks the pointer as "has moved", allowing dwell to start.
       hasMovedRef.current = true;
+      // Pointer moving inside the checkbox gutter (left of the card): start trail mode at once,
+      // skipping the dwell. Uses mousemove, not mouseenter, so scrolling under a resting pointer
+      // does not trigger it.
+      if (e.clientX < e.currentTarget.getBoundingClientRect().left + CHECKBOX_GUTTER_PX) {
+        if (dwellTimerRef.current) { clearTimeout(dwellTimerRef.current); dwellTimerRef.current = null; }
+        dwellOrigin.current = null;
+        trailModeRef.current = true;
+        setTrailMode(true);
+        setHoveredId(id);
+        setPreviewId(null);
+        resetIdleTimer();
+        return;
+      }
       // If a dwell is in progress and the pointer moved more than ~6 px, restart the timer.
       if (dwellOrigin.current?.id === id) {
         const dx = e.clientX - dwellOrigin.current.x;
