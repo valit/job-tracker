@@ -2746,17 +2746,18 @@ function JobsView({ jobs, activities, onSelect, archivedOpen, setArchivedOpen, s
   };
 
   return (
-    <div style={{ maxWidth: isMobile ? "100%" : 760, margin: "0 auto", paddingLeft: !isTouch && selectionMode ? 44 : 0, transition: !isTouch ? "padding-left 0.2s" : undefined }}>
+    <div style={{ maxWidth: isMobile ? "100%" : 760, margin: "0 auto" }}>
       {/*
-        In-flow spacer: height animates between filterRowH and bulkBarH.
-        No sticky, no overflow:hidden — purely reserves space to push jobs smoothly.
+        In-flow spacer. Desktop: always the filter row's height, so the list does not move
+        when selection mode swaps the filter row for the bulk bar. Touch: height animates
+        between filterRowH and bulkBarH.
         The filter row is absolutely positioned inside (doesn't add to spacer height).
         The bulk bar is separately position:fixed so it doesn't affect layout at all.
       */}
       <div style={{
         position: "relative",
-        height: (selectionMode ? bulkBarH : filterRowH) || "auto",
-        marginBottom: selectionMode ? 12 : 20,
+        height: (isTouch && selectionMode ? bulkBarH : filterRowH) || "auto",
+        marginBottom: isTouch && selectionMode ? 12 : 20,
         transition: reducedMotion ? "none" : "height 0.25s ease, margin-bottom 0.25s ease",
         // overflow:hidden clips the crossfading children; does NOT affect the fixed bar.
         overflow: "hidden",
