@@ -27,3 +27,13 @@ body { background: var(--bg); color: var(--text); font-family: 'Inter', -apple-s
 ::-webkit-scrollbar { width: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+/* Applications pile on the Jobs page: hover lift on the front card, hover on the
+   "N applications" button, and keyboard focus rings. */
+@media (hover: hover) {
+  .applications-pile:hover .applications-pile-front { box-shadow: 0 2px 14px rgba(0, 0, 0, 0.07); }
+  .applications-toggle:not([aria-disabled="true"]):hover { background: #E4E4E4 !important; }
+}
+.applications-pile:focus { outline: none; }
+.applications-pile:focus-visible,
+.applications-toggle:focus-visible { outline: 2px solid #4493FC; outline-offset: 3px; }

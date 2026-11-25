@@ -1,8 +1,8 @@
 "use client";
-import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import React, { useState, useEffect, useLayoutEffect, useCallback, useRef, useMemo } from "react";
 import type { Company, CompanyLink, Job, Activity, Asset, JobStatus, ActivityType, AssetType, PersonTitle } from "@/lib/notion";
 import {
-  Plus, X, ExternalLink, ChevronRight, ChevronLeft, ChevronDown,
+  Plus, X, ExternalLink, ChevronRight, ChevronLeft, ChevronDown, ChevronUp,
   Search, Loader2, Mail, Phone, Video, FileText, MessageSquare, Star,
   ArrowUpRight, Check, AlertCircle, Link, User, Trash2,
   Send, Pencil, Building2, Briefcase, Paperclip, Globe, Archive, FilePlus,
@@ -2212,6 +2212,25 @@ interface UndoRecord {
 
 // ── Jobs View ──────────────────────────────────────────────────────────────
 
+// ── Applications pile ─────────────────────────────────────────────────────
+// "Applied (no response)" jobs are shown as a pile of cards per time section, which fans out
+// into normal cards (under an "N applications" button that folds it back) when clicked.
+const PILE_STATUS: JobStatus = "Applied (no response)";
+// A pile only forms from this many jobs; fewer are shown as normal cards.
+const PILE_MIN_JOBS = 3;
+// How much each card behind the front one is inset per side.
+const PILE_INSET_PX = 12;
+// How much of each card behind the front card shows in a collapsed pile.
+const PILE_PEEK_DESKTOP_PX = 12;
+const PILE_PEEK_PHONE_PX = 10;
+// Fill of the cards behind the front one: a touch darker than the page background (#F9F9F9).
+const PILE_PEEK_BG = "#F7F7F7";
+const PILE_FAN_MS = 360;
+const PILE_EASING = "cubic-bezier(0.2, 0.8, 0.2, 1)";
+// Time sections whose pile the user has fanned out. Module-level so it survives opening a job
+// and coming back, but starts empty again on every page load.
+const fannedPilesThisLoad = new Set<TimeBucket>();
+
 function JobsView({ jobs, activities, onSelect, archivedOpen, setArchivedOpen, scrollToArchived, onAfterScroll, filter, setFilter, onJobsBulkUpdate, onActivitiesAdd, onActivityDelete }: {
   jobs: Job[]; activities: Activity[];
   onSelect: (j: Job) => void;
@@ -2326,18 +2345,148 @@ function JobsView({ jobs, activities, onSelect, archivedOpen, setArchivedOpen, s
   const STATUS_ORDER: JobStatus[] = ["In progress", "Want to apply", "Saved", "Applied (referred)", "Applied (no response)", "Closed"];
   const sortKey = (j: Job) => (j.companyName || j.name || "").toLowerCase();
 
-  const visibleJobIds = useMemo(() => {
-    const ids: string[] = [];
-    for (const bucket of TIME_SECTION_ORDER) {
-      if (!sectionOpen[bucket]) continue;
-      const bj = filtered.filter(j => timeBucket(latestDate[j.id] || today()) === bucket);
-      for (const st of STATUS_ORDER) {
-        bj.filter(j => j.status === st).sort((a, b) => sortKey(a).localeCompare(sortKey(b))).forEach(j => ids.push(j.id));
-      }
-    }
-    if (archivedOpen) archivedJobs.forEach(j => ids.push(j.id));
-    return ids;
-  }, [filtered, archivedJobs, sectionOpen, archivedOpen, latestDate]);
+  // ── Applications pile state ──────────────────────────────────────────────
+  const [fannedPiles, setFannedPiles] = useState<Set<TimeBucket>>(() => new Set(fannedPilesThisLoad));
+  // While a status filter or a search is active, groups are shown fanned out (with no button to
+  // fold them) so no match is hidden. `fannedPiles` is left alone, so clearing the filter or the
+  // search returns every group to the state the user left it in.
+  const pilesAutoFanned = filter !== "All" || search.trim() !== "";
+  // How far each card behind the front one peeks out above it.
+  const pilePeek = isMobile ? PILE_PEEK_PHONE_PX : PILE_PEEK_DESKTOP_PX;
+  const pileRefs = useRef<Partial<Record<TimeBucket, HTMLDivElement | null>>>({});
+  const pileGroupRefs = useRef<Partial<Record<TimeBucket, HTMLDivElement | null>>>({});
+  const pileToggleRefs = useRef<Partial<Record<TimeBucket, HTMLButtonElement | null>>>({});
+  // Set when a pile is clicked, consumed by the layout effect below to animate the fan-out.
+  const pendingFan = useRef<{ bucket: TimeBucket; pileHeight: number; frontId: string; peeks: number; refocus: boolean } | null>(null);
+  // Fold-back animations in flight; cancelled once the pile itself has been rendered.
+  const foldAnims = useRef<Animation[]>([]);
+  const foldingBucket = useRef<TimeBucket | null>(null);
+  const refocusPile = useRef<TimeBucket | null>(null);
+
+  // The pile's front card: the job with the most recent activity.
+  const pileFront = (group: Job[]) => group.reduce((best, j) => ((latestDate[j.id] || "") > (latestDate[best.id] || "") ? j : best), group[0]);
+
+  // One entry per time section: its jobs, grouped by status in display order.
+  //   pileable — the Applied group, with enough jobs, and no filter/search forcing it open
+  //   stacked  — pileable and currently shown as a collapsed pile. Never while one of its jobs
+  //              is selected, so a bulk action can never touch a job hidden in a pile.
+  const timeSections = TIME_SECTION_ORDER.map(bucket => {
+    const bucketJobs = filtered.filter(j => timeBucket(latestDate[j.id] || today()) === bucket);
+    const groups = STATUS_ORDER
+      .map(status => {
+        const list = bucketJobs.filter(j => j.status === status).sort((a, b) => sortKey(a).localeCompare(sortKey(b)));
+        const pileable = status === PILE_STATUS && list.length >= PILE_MIN_JOBS && !pilesAutoFanned;
+        const hasSelected = list.some(j => selectedIds.has(j.id));
+        const stacked = pileable && !fannedPiles.has(bucket) && !hasSelected;
+        return { status, jobs: list, pileable, stacked, hasSelected };
+      })
+      .filter(g => g.jobs.length > 0);
+    return { bucket, bucketJobs, groups };
+  });
+
+  // Jobs that can be hovered/selected, in visible order. Jobs inside a collapsed pile are left out.
+  const visibleJobIds: string[] = [];
+  for (const sec of timeSections) {
+    if (!sectionOpen[sec.bucket]) continue;
+    for (const g of sec.groups) if (!g.stacked) g.jobs.forEach(j => visibleJobIds.push(j.id));
+  }
+  if (archivedOpen) archivedJobs.forEach(j => visibleJobIds.push(j.id));
+
+  // Where each job row sits when the group is drawn as a pile, relative to where it sits in the
+  // fanned-out list. Used as the first keyframe when fanning out and the last when folding back.
+  const pileRowFrames = (container: HTMLElement, frontId: string, peeks: number) => {
+    const box = container.getBoundingClientRect();
+    const gutter = isTouch ? 0 : CHECKBOX_GUTTER_PX;
+    const rows = (Array.from(container.children) as HTMLElement[]).filter(el => el.dataset.jobId);
+    let behind = 0;
+    return rows.map(row => {
+      const r = row.getBoundingClientRect();
+      const isFront = row.dataset.jobId === frontId;
+      const k = isFront ? 0 : ++behind; // 1 = just behind the front card, 2 = behind that, …
+      const peekK = Math.min(k, peeks);
+      const cardW = r.width - gutter;
+      const dy = (peeks - peekK) * pilePeek - (r.top - box.top);
+      const scale = cardW > 0 ? (cardW - 2 * PILE_INSET_PX * peekK) / cardW : 1;
+      // Scale around the card's centre (the row also includes the checkbox gutter on desktop).
+      const transformOrigin = `calc(50% + ${gutter / 2}px) 0`;
+      const zIndex = isFront ? 3 : k === 1 ? 2 : 1;
+      return {
+        row, isFront, height: r.height,
+        piled: { transform: `translateY(${dy}px) scaleX(${scale})`, opacity: isFront || k <= peeks ? 1 : 0, zIndex, transformOrigin },
+        fanned: { transform: "translateY(0) scaleX(1)", opacity: 1, zIndex, transformOrigin },
+      };
+    });
+  };
+
+  const fanOutPile = (bucket: TimeBucket, frontId: string, peeks: number) => {
+    const el = pileRefs.current[bucket];
+    pendingFan.current = { bucket, pileHeight: el ? el.offsetHeight : 0, frontId, peeks, refocus: !!el && document.activeElement === el };
+    fannedPilesThisLoad.add(bucket);
+    setFannedPiles(prev => new Set(prev).add(bucket));
+  };
+
+  // Folds a fanned-out group back into its pile: the rows slide back behind the front card and
+  // turn gray, the group shrinks to the pile's height, then the pile itself is rendered.
+  const foldPile = (bucket: TimeBucket, group: Job[]) => {
+    if (foldingBucket.current || group.some(j => selectedIds.has(j.id))) return;
+    let done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      refocusPile.current = document.activeElement === pileToggleRefs.current[bucket] ? bucket : null;
+      fannedPilesThisLoad.delete(bucket);
+      setFannedPiles(prev => { const n = new Set(prev); n.delete(bucket); return n; });
+    };
+    const container = pileGroupRefs.current[bucket];
+    if (!container || reducedMotion || typeof container.animate !== "function") { finish(); return; }
+    const peeks = Math.min(group.length - 1, 2);
+    const frames = pileRowFrames(container, pileFront(group).id, peeks);
+    const frontH = frames.find(f => f.isFront)?.height ?? 0;
+    const opts: KeyframeAnimationOptions = { duration: PILE_FAN_MS, easing: PILE_EASING, fill: "forwards" };
+    const anims: Animation[] = [];
+    frames.forEach(f => {
+      anims.push(f.row.animate([f.fanned, f.piled], opts));
+      const card = f.row.lastElementChild as HTMLElement | null;
+      if (!f.isFront && card) anims.push(card.animate([{ backgroundColor: "#fff" }, { backgroundColor: PILE_PEEK_BG }], opts));
+    });
+    const toggle = pileToggleRefs.current[bucket];
+    if (toggle) anims.push(toggle.animate([{ opacity: 1 }, { opacity: 0 }], { ...opts, duration: PILE_FAN_MS / 2 }));
+    const sizeAnim = container.animate([{ height: `${container.getBoundingClientRect().height}px` }, { height: `${peeks * pilePeek + frontH}px` }], opts);
+    anims.push(sizeAnim);
+    foldAnims.current = anims;
+    foldingBucket.current = bucket;
+    sizeAnim.onfinish = finish;
+    // Safety net: if the browser never finishes the animation (e.g. a throttled tab), fold anyway.
+    setTimeout(finish, PILE_FAN_MS + 250);
+  };
+
+  // Runs after a pile has been fanned out or folded back.
+  useLayoutEffect(() => {
+    // Folded back: the pile is now rendered, so drop the held end-state of the fold animation.
+    foldAnims.current.forEach(a => a.cancel());
+    foldAnims.current = [];
+    foldingBucket.current = null;
+    if (refocusPile.current) { pileRefs.current[refocusPile.current]?.focus({ preventScroll: true }); refocusPile.current = null; }
+
+    // Fanned out: the freshly rendered rows start where the pile's cards were and slide to their
+    // places, turning white, while the group grows from the pile's height so the content below
+    // moves once and the "N applications" button fades in.
+    const fan = pendingFan.current;
+    if (!fan) return;
+    pendingFan.current = null;
+    const toggle = pileToggleRefs.current[fan.bucket];
+    if (fan.refocus) toggle?.focus({ preventScroll: true });
+    const container = pileGroupRefs.current[fan.bucket];
+    if (!container || reducedMotion || !fan.pileHeight || typeof container.animate !== "function") return;
+    const opts: KeyframeAnimationOptions = { duration: PILE_FAN_MS, easing: PILE_EASING };
+    pileRowFrames(container, fan.frontId, fan.peeks).forEach(f => {
+      f.row.animate([f.piled, f.fanned], opts);
+      const card = f.row.lastElementChild as HTMLElement | null;
+      if (!f.isFront && card) card.animate([{ backgroundColor: PILE_PEEK_BG }, { backgroundColor: "#fff" }], opts);
+    });
+    toggle?.animate([{ opacity: 0 }, { opacity: 1 }], opts);
+    container.animate([{ height: `${fan.pileHeight}px` }, { height: `${container.getBoundingClientRect().height}px` }], opts);
+  }, [fannedPiles]);
 
   const showToast = (msg: string, canUndo: boolean, progress?: number) => {
     if (toastTimer.current) clearTimeout(toastTimer.current);
@@ -2670,12 +2819,91 @@ function JobsView({ jobs, activities, onSelect, archivedOpen, setArchivedOpen, s
     };
   }, []);
 
+  // Logo, title, company, status badge and date — shared by normal rows and the pile's front card.
+  const renderCardBody = (j: Job) => {
+    const d = latestDate[j.id];
+    const fmt = d ? formatDate(d) : "";
+    return (
+      <>
+    <CompanyLogo name={j.companyName || "?"} logoUrl={j.companyLogoUrl || undefined} size={40} radius={10} />
+    {isMobile ? (
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 15, fontWeight: 500, color: C.text, marginBottom: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{j.name}</div>
+        <div style={{ fontSize: 13, color: C.muted, marginBottom: 8, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{j.companyName}{j.location ? ` · ${j.location}` : ""}</div>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <StatusBadge status={j.status} />
+          {fmt ? <span style={{ fontSize: 11, color: C.muted }}>{fmt}</span> : null}
+        </div>
+      </div>
+    ) : (
+      <>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 15, fontWeight: 500, color: C.text, marginBottom: 3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 400 }}>{j.name}</div>
+          <div style={{ fontSize: 13, color: C.muted }}>{j.companyName}{j.location ? ` · ${j.location}` : ""}</div>
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 9, flexShrink: 0 }}>
+          <StatusBadge status={j.status} />
+          {fmt ? <span style={{ fontSize: 11, color: C.muted }}>{fmt}</span> : null}
+        </div>
+      </>
+    )}
+      </>
+    );
+  };
+
+  // Collapsed pile for one time section: the most recently active job as a normal-looking card in
+  // front, with two light gray cards peeking out above it. The whole pile is one button that fans
+  // the jobs out; it has no checkbox and cannot be selected.
+  const renderPile = (bucket: TimeBucket, group: Job[]) => {
+    const front = pileFront(group);
+    const peeks = Math.min(group.length - 1, 2);
+    const fan = () => fanOutPile(bucket, front.id, peeks);
+    return (
+      <div key={`pile-${bucket}`} style={{ minWidth: 0 }}>
+        <div ref={el => { pileRefs.current[bucket] = el; }}
+          role="button" tabIndex={0} aria-expanded={false}
+          aria-label={`${group.length} applications, expand`}
+          className="applications-pile"
+          onClick={fan}
+          onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); fan(); } }}
+          style={{ position: "relative", paddingTop: peeks * pilePeek, borderRadius: 12, cursor: "pointer", userSelect: "none", WebkitTouchCallout: "none" as any, WebkitTapHighlightColor: "transparent", minWidth: 0 }}>
+          {Array.from({ length: peeks }, (_, i) => {
+            const k = peeks - i; // farthest card first, so nearer ones paint on top
+            return (
+              <div key={k} aria-hidden style={{
+                position: "absolute", top: (peeks - k) * pilePeek, left: PILE_INSET_PX * k, right: PILE_INSET_PX * k, height: pilePeek + 40,
+                background: PILE_PEEK_BG, border: `1px solid ${C.border}`, borderLeft: `3px solid ${STATUS_BORDER[PILE_STATUS]}`, borderRadius: 12,
+              }} />
+            );
+          })}
+          <div className="applications-pile-front" style={{ position: "relative", background: "#fff", borderRadius: 12, display: "flex", alignItems: isMobile ? "flex-start" : "center", gap: 16, minWidth: 0, overflow: "hidden", border: `1px solid ${C.border}`, borderLeft: `3px solid ${STATUS_BORDER[front.status]}`, padding: isMobile ? "12px 16px" : "22px 20px", transition: "box-shadow .15s" }}>
+            {renderCardBody(front)}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // "N applications" button above a fanned-out group; folds the group back into its pile.
+  // Unavailable while any of the group's jobs is selected.
+  const renderPileToggle = (bucket: TimeBucket, group: Job[], locked: boolean) => (
+    <div key={`pile-toggle-${bucket}`} style={{ display: "flex", justifyContent: "center", marginBottom: 2, minWidth: 0 }}>
+      <button ref={el => { pileToggleRefs.current[bucket] = el; }}
+        type="button" className="applications-toggle"
+        aria-expanded={true} aria-disabled={locked || undefined}
+        aria-label={locked ? `${group.length} applications, collapse, unavailable while jobs are selected` : `${group.length} applications, collapse`}
+        onClick={() => { if (!locked) foldPile(bucket, group); }}
+        style={{ display: "inline-flex", alignItems: "center", gap: 6, border: "none", borderRadius: 6, padding: "4px 8px 4px 10px", fontSize: 12, lineHeight: "14px", fontWeight: 500, fontFamily: "ui-monospace, 'SF Mono', Menlo, monospace", color: "#7A776F", background: "#ECECEC", whiteSpace: "nowrap", cursor: locked ? "not-allowed" : "pointer", opacity: locked ? 0.55 : 1, transition: "opacity .15s" }}>
+        {group.length} applications
+        <ChevronUp size={14} aria-hidden="true" focusable="false" style={{ flexShrink: 0 }} />
+      </button>
+    </div>
+  );
+
   const renderJobRow = (j: Job) => {
     const isSelected = selectedIds.has(j.id);
     // On touch: no checkboxes. On desktop: shown in selection mode, hovered, or anticipated.
     const showCb = !isTouch && (selectionMode || hoveredId === j.id || previewId === j.id);
-    const d = latestDate[j.id];
-    const fmt = d ? formatDate(d) : "";
 
     // Selected: 2px top/bottom, 4px left/right. Padding reduced by the extra border on each side
     // vs unselected (top−1, bottom−1, left−1, right−3) so outer size and content don't move.
@@ -2693,7 +2921,7 @@ function JobsView({ jobs, activities, onSelect, archivedOpen, setArchivedOpen, s
     const cbTransition = showCb ? "opacity 0.12s" : "opacity 0.47s ease-out 0.05s";
 
     return (
-      <div key={j.id} style={wrapperStyle}
+      <div key={j.id} data-job-id={j.id} style={wrapperStyle}
         onMouseEnter={isTouch ? undefined : (e) => hoverEnter(j.id, e)}
         onMouseLeave={isTouch ? undefined : () => hoverLeave(j.id)}
         onMouseMove={isTouch ? undefined : (e) => handleCardMouseMove(e, j.id)}>
@@ -2718,28 +2946,7 @@ function JobsView({ jobs, activities, onSelect, archivedOpen, setArchivedOpen, s
           onTouchStart={e => handleTouchStart(e, j.id)}
           onTouchMove={handleTouchMove}
           onTouchEnd={handleTouchEnd}>
-          <CompanyLogo name={j.companyName || "?"} logoUrl={j.companyLogoUrl || undefined} size={40} radius={10} />
-          {isMobile ? (
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontSize: 15, fontWeight: 500, color: C.text, marginBottom: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{j.name}</div>
-              <div style={{ fontSize: 13, color: C.muted, marginBottom: 8, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{j.companyName}{j.location ? ` · ${j.location}` : ""}</div>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                <StatusBadge status={j.status} />
-                {fmt ? <span style={{ fontSize: 11, color: C.muted }}>{fmt}</span> : null}
-              </div>
-            </div>
-          ) : (
-            <>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 15, fontWeight: 500, color: C.text, marginBottom: 3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 400 }}>{j.name}</div>
-                <div style={{ fontSize: 13, color: C.muted }}>{j.companyName}{j.location ? ` · ${j.location}` : ""}</div>
-              </div>
-              <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 9, flexShrink: 0 }}>
-                <StatusBadge status={j.status} />
-                {fmt ? <span style={{ fontSize: 11, color: C.muted }}>{fmt}</span> : null}
-              </div>
-            </>
-          )}
+          {renderCardBody(j)}
         </div>
       </div>
     );
@@ -2880,12 +3087,8 @@ function JobsView({ jobs, activities, onSelect, archivedOpen, setArchivedOpen, s
       {/* Time sections */}
       {filtered.length > 0 && (
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-          {TIME_SECTION_ORDER.map(bucket => {
-            const bucketJobs = filtered.filter(j => timeBucket(latestDate[j.id] || today()) === bucket);
+          {timeSections.map(({ bucket, bucketJobs, groups }) => {
             if (bucketJobs.length === 0) return null;
-            const groups = STATUS_ORDER
-              .map(status => bucketJobs.filter(j => j.status === status).sort((a, b) => sortKey(a).localeCompare(sortKey(b))))
-              .filter(g => g.length > 0);
             const isOpen = sectionOpen[bucket];
             return (
               <div key={bucket}>
@@ -2896,9 +3099,14 @@ function JobsView({ jobs, activities, onSelect, archivedOpen, setArchivedOpen, s
                 </button>
                 {isOpen && (
                   <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
-                    {groups.map((group, gi) => (
-                      <div key={gi} style={{ display: "grid", gap: 8 }}>
-                        {group.map(renderJobRow)}
+                    {groups.map(group => (
+                      <div key={group.status} ref={group.status === PILE_STATUS ? (el => { pileGroupRefs.current[bucket] = el; }) : undefined} style={{ display: "grid", gap: 8 }}>
+                        {group.stacked ? renderPile(bucket, group.jobs) : (
+                          <>
+                            {group.pileable && renderPileToggle(bucket, group.jobs, group.hasSelected)}
+                            {group.jobs.map(renderJobRow)}
+                          </>
+                        )}
                       </div>
                     ))}
                   </div>
