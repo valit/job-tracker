@@ -1,5 +1,6 @@
 "use client";
 import React, { useState, useEffect, useLayoutEffect, useCallback, useRef, useMemo } from "react";
+import { driveFileId } from "@/lib/drive-link";
 import type { Company, CompanyLink, Job, Activity, Asset, JobStatus, ActivityType, AssetType, PersonTitle } from "@/lib/notion";
 import {
   Plus, X, ExternalLink, ChevronRight, ChevronLeft, ChevronDown, ChevronUp,
@@ -43,6 +44,34 @@ function usePrefersReducedMotion() {
     return () => mq.removeEventListener("change", handler);
   }, []);
   return prefers;
+}
+
+// Real Google Drive file names for Document assets, by file ID. Kept for the page's lifetime so a
+// modal opened twice shows the name at once; the browser also remembers each answer for a day.
+const driveNames = new Map<string, Promise<string | null>>();
+
+// The Drive file name for a Google link, or null while loading, when the link is not a Google
+// link, or when the name cannot be read for any reason (the caller then keeps its normal look).
+function useDriveName(link: string): string | null {
+  const id = driveFileId(link);
+  const [found, setFound] = useState<{ id: string; name: string } | null>(null);
+  useEffect(() => {
+    if (!id) return;
+    let live = true;
+    let lookup = driveNames.get(id);
+    if (!lookup) {
+      lookup = fetch(`/api/drive-name?id=${encodeURIComponent(id)}`)
+        .then(r => (r.ok ? r.json() : null))
+        .then(d => (d && typeof d.name === "string" && d.name ? d.name as string : null))
+        .catch(() => null);
+      driveNames.set(id, lookup);
+      // A miss is not kept, so a later open asks again.
+      lookup.then(name => { if (!name) driveNames.delete(id); });
+    }
+    lookup.then(name => { if (live && name) setFound({ id, name }); });
+    return () => { live = false; };
+  }, [id]);
+  return found && found.id === id ? found.name : null;
 }
 
 async function fetchWithRetry(url: string, options: RequestInit, retries = 3): Promise<Response> {
@@ -1443,6 +1472,15 @@ function EditAssetModal({ asset, companies, jobs, onClose, onSave, onDelete, onN
   const displayLabel = isPerson ? (asset.personName || asset.label) : asset.label;
   const TypeIcon = ASSET_ICONS[asset.type];
 
+  // Documents: the real Google Drive file name becomes the title, with the typed label kept
+  // underneath as a smaller note. Until the name arrives (or if it never does) the modal keeps
+  // its normal look. A label that is only the start of the link counts as no note.
+  const driveName = useDriveName(asset.type === "Document" ? asset.assetUrl : "");
+  const labelText = (asset.label || "").trim();
+  const labelIsLinkStart = labelText !== "" && (asset.assetUrl || "").startsWith(labelText.replace(/…$/, ""));
+  const titleText = driveName || displayLabel;
+  const noteText = driveName && labelText && !labelIsLinkStart && labelText !== driveName.trim() ? labelText : "";
+
   const save = async () => {
     setSaving(true);
     setSaveError("");
@@ -1489,7 +1527,18 @@ function EditAssetModal({ asset, companies, jobs, onClose, onSave, onDelete, onN
               <input style={{ ...inputStyle, fontSize: 18, fontFamily: "Georgia, serif" }} value={form.label} onChange={u("label")} />
             </Field>
           ) : (
-            <h2 style={{ fontSize: 22, fontWeight: 600, fontFamily: "Georgia, 'Times New Roman', serif", color: C.text, marginBottom: 14 }}>{displayLabel}</h2>
+            <div style={{ marginBottom: 14, minWidth: 0 }}>
+              <h2 key={driveName ? "drive-name" : "label"} className={driveName ? "drive-name-in" : undefined}
+                style={{ fontSize: 22, fontWeight: 600, fontFamily: "Georgia, 'Times New Roman', serif", color: C.text, margin: 0, paddingRight: driveName ? 24 : undefined, overflowWrap: driveName ? "anywhere" : undefined }}>{titleText}</h2>
+              {asset.type === "Document" && (
+                // Opens smoothly from zero height when there is a note to show, so nothing jumps.
+                <div className="drive-note" style={{ display: "grid", gridTemplateRows: noteText ? "1fr" : "0fr", opacity: noteText ? 1 : 0 }}>
+                  <div style={{ overflow: "hidden", minHeight: 0 }}>
+                    <div style={{ paddingTop: 6, fontSize: 14, lineHeight: 1.45, color: C.muted, overflowWrap: "anywhere" }}>{noteText}</div>
+                  </div>
+                </div>
+              )}
+            </div>
           )}
 
           {!isPerson && (

@@ -37,3 +37,13 @@ body { background: var(--bg); color: var(--text); font-family: 'Inter', -apple-s
 .applications-pile:focus { outline: none; }
 .applications-pile:focus-visible,
 .applications-toggle:focus-visible { outline: 2px solid #4493FC; outline-offset: 3px; }
+
+/* Document asset modal: the Google Drive file name fades in as the title and the note below it
+   opens smoothly. */
+@keyframes drive-name-in { from { opacity: 0.35; } to { opacity: 1; } }
+.drive-name-in { animation: drive-name-in 0.25s ease-out; }
+.drive-note { transition: grid-template-rows 0.25s ease-out, opacity 0.25s ease-out; }
+@media (prefers-reduced-motion: reduce) {
+  .drive-name-in { animation: none; }
+  .drive-note { transition: none; }
+}
