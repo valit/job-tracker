@@ -9,6 +9,28 @@ export const JOBS_DB      = DEMO ? "d5c67517-4ab0-473c-b1d0-66c01f7b7b6b" : proc
 export const ACTIVITY_DB  = DEMO ? "5f45d7af-1d73-4fba-af2c-eb041abf4df5" : process.env.NOTION_ACTIVITY_DB!;
 export const ASSETS_DB    = DEMO ? "6345f517-931e-4dd7-a4c9-c7efb76c6307" : process.env.NOTION_ASSETS_DB!;
 
+// Notion returns at most 100 rows per query. This keeps asking for the next
+// page until there are none left, and spaces the requests out so one list
+// never asks for more than about 3 pages a second (Notion's rate limit).
+const MIN_PAGE_INTERVAL_MS = 350;
+
+export async function queryAllPages(queryParams: any): Promise<any[]> {
+  const results: any[] = [];
+  let cursor: string | undefined;
+  let lastStart = 0;
+  do {
+    const wait = lastStart + MIN_PAGE_INTERVAL_MS - Date.now();
+    if (wait > 0) await new Promise(resolve => setTimeout(resolve, wait));
+    lastStart = Date.now();
+    const response: any = await notion.dataSources.query(
+      cursor ? { ...queryParams, start_cursor: cursor } : queryParams,
+    );
+    results.push(...response.results);
+    cursor = response.has_more ? response.next_cursor ?? undefined : undefined;
+  } while (cursor);
+  return results;
+}
+
 // ── Types ──────────────────────────────────────────────────────────────────
 
 export type JobStatus =

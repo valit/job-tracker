@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { notion, ASSETS_DB, parseAsset } from "@/lib/notion";
+import { notion, ASSETS_DB, parseAsset, queryAllPages } from "@/lib/notion";
 
 export async function GET(req: NextRequest) {
   try {
@@ -11,8 +11,8 @@ export async function GET(req: NextRequest) {
       queryParams.filter = { property: "Job", relation: { contains: jobId } };
     }
 
-    const response = await notion.dataSources.query(queryParams);
-    return NextResponse.json((response as any).results.map(parseAsset));
+    const results = await queryAllPages(queryParams);
+    return NextResponse.json(results.map(parseAsset));
   } catch (e: any) {
     return NextResponse.json({ error: e.message }, { status: 500 });
   }
